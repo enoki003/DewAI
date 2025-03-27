@@ -10,6 +10,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@chakra-ui/icons": "^2.2.4",
     "@chakra-ui/react": "^3.14.2",
     "@emotion/react": "^11.14.0",
     "@tauri-apps/api": "^2",
@@ -18,7 +19,8 @@
     "next-themes": "^0.4.6",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-icons": "^5.5.0"
+    "react-icons": "^5.5.0",
+    "react-router-dom": "^7.4.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
