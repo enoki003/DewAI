@@ -10,7 +10,12 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@chakra-ui/card": "^2.2.0",
+    "@chakra-ui/checkbox": "^2.3.2",
+    "@chakra-ui/form-control": "^2.2.0",
     "@chakra-ui/icons": "^2.2.4",
+    "@chakra-ui/layout": "^2.3.1",
+    "@chakra-ui/number-input": "^2.1.2",
     "@chakra-ui/react": "^3.14.2",
     "@emotion/react": "^11.14.0",
     "@tauri-apps/api": "^2",

@@ -11,9 +11,9 @@ function Home() {
             height="100vh"
             justifyContent="center"
         >
-            <Heading size="4xl">DewAIへようこそ</Heading>
-            <Text fontSize="2xl">軽量で手軽な議論を開始しよう</Text>
-            <Button colorScheme="blue" size="lg" onClick={() => navigate('/about')}>
+            <Heading size="3xl">DewAIへようこそ</Heading>
+            <Text fontSize="md">軽量で手軽な議論を開始しよう</Text>
+            <Button  colorScheme="blue" size="lg" onClick={() => navigate('/about')}>
             始める
             </Button>
         </VStack>
