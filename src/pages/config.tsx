@@ -1,4 +1,5 @@
 import React from "react";
+import { useNavigate } from 'react-router-dom';
 import {
   VStack,
   Heading,
@@ -27,6 +28,8 @@ function Config() {
   const [numAI, setNumAI] = React.useState(1);
   const [showFields, setShowFields] = React.useState(false);
   const [participate, setParticipate] = React.useState(true);
+
+  const navigate = useNavigate();
 
   interface AIData {
     name: string;
@@ -141,7 +144,9 @@ function Config() {
         </CheckboxRoot>
       </FieldRoot>
 
-      <Button colorScheme="blue">クリックしてください</Button>
+      <Button colorScheme="blue" size="lg" onClick={() => navigate('/play')}>
+        開始
+      </Button>
     </VStack>
   );
 }
