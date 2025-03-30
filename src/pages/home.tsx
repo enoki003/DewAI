@@ -13,7 +13,7 @@ function Home() {
         >
             <Heading size="3xl">DewAIへようこそ</Heading>
             <Text fontSize="md">軽量で手軽な議論を開始しよう</Text>
-            <Button  colorScheme="blue" size="lg" onClick={() => navigate('/about')}>
+            <Button  colorScheme="blue" size="lg" onClick={() => navigate('/config')}>
             始める
             </Button>
         </VStack>
