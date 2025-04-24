@@ -23,8 +23,11 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
-candle = { git = "https://github.com/huggingface/candle", package = "candle-core" }
-anyhow = "1.0"
-rand = "0.8.5"
-rand_distr = "0.4.3"
-half = "2.3.0"  # halfを直接依存関係として追加し、バージョンを固定
+# HTTP クライアント reqwest（JSON 機能有効化）
+reqwest = { version = "0.12.15", features = ["json"] }        # :contentReference[oaicite:3]{index=3}
+
+# 非同期ランタイム Tokio
+tokio   = { version = "1.44.2", features = ["rt-multi-thread", "macros"] }  # :contentReference[oaicite:4]{index=4}
+
+# エラー処理
+anyhow    = "1.0"                                  
