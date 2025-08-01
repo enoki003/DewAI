@@ -41,7 +41,7 @@ export function useAIModel() {
     role: string,
     description: string,
     conversationHistory: string,
-    query: string
+    discussionTopic: string
   ): Promise<string> {
     if (!isModelLoaded) throw new Error('モデルがロードされていません');
     setIsGenerating(true);
@@ -51,12 +51,31 @@ export function useAIModel() {
         role,
         description,
         conversationHistory,
-        query,
+        discussionTopic,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError({ message });
       throw new Error(message);
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
+  async function startDiscussion(
+    topic: string,
+    participants: string[]
+  ): Promise<string> {
+    if (!isModelLoaded) throw new Error('モデルがロードされていません');
+    setIsGenerating(true);
+    try {
+      return await invoke<string>('start_discussion', {
+        topic,
+        participants,
+      });
+    } catch (err) {
+      console.error('議論開始エラー:', err);
+      throw err;
     } finally {
       setIsGenerating(false);
     }
@@ -68,5 +87,6 @@ export function useAIModel() {
     error,
     generateText,
     generateAIResponse,
+    startDiscussion,
   };
 }

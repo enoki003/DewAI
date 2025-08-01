@@ -28,6 +28,7 @@ function Config() {
   const [numAI, setNumAI] = React.useState(1);
   const [showFields, setShowFields] = React.useState(false);
   const [participate, setParticipate] = React.useState(true);
+  const [discussionTopic, setDiscussionTopic] = React.useState('');
 
   const navigate = useNavigate();
 
@@ -59,6 +60,15 @@ function Config() {
     <VStack gap={6} align="center" padding={8} minH="100vh" justifyContent="flex-start">
       <Heading size="4xl">議論の設定</Heading>
       <Text fontSize="2xl">シチュエーション、テーマ、役職を決定します</Text>
+
+      <FieldRoot>
+        <FieldLabel>議論のテーマ</FieldLabel>
+        <Input
+          value={discussionTopic}
+          onChange={(e) => setDiscussionTopic(e.target.value)}
+          placeholder="例: 環境問題への対応策について"
+        />
+      </FieldRoot>
 
       <FieldRoot>
         <FieldLabel>何人のAIと議論しますか？</FieldLabel>
@@ -144,7 +154,32 @@ function Config() {
         </CheckboxRoot>
       </FieldRoot>
 
-      <Button colorScheme="blue" size="lg" onClick={() => navigate('/play')}>
+      <Button 
+        colorScheme="blue" 
+        size="lg" 
+        onClick={() => {
+          // AIデータを検証してからPlayページに遷移
+          const validAiData = aiData.filter(ai => ai.name && ai.role && ai.description);
+          if (validAiData.length === 0) {
+            alert('最低1人のAIの設定を完了してください');
+            return;
+          }
+          
+          if (!discussionTopic.trim()) {
+            alert('議論のテーマを入力してください');
+            return;
+          }
+          
+          // AIデータを localStorage に保存
+          localStorage.setItem('aiConfig', JSON.stringify({
+            aiData: validAiData,
+            participate: participate,
+            discussionTopic: discussionTopic.trim()
+          }));
+          
+          navigate('/play');
+        }}
+      >
         開始
       </Button>
     </VStack>
