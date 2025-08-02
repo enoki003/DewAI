@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { Button, VStack, Heading, Text, HStack } from '@chakra-ui/react';
+import { Button, VStack, Heading, Text } from '@chakra-ui/react';
 
 function Start() {
     const navigate = useNavigate();
@@ -11,54 +11,44 @@ function Start() {
             padding={8}
             height="100vh"
             justifyContent="center"
+            maxW="md"
+            mx="auto"
         >
-            <VStack gap={4}>
-                <Heading size="2xl">議論を始めましょう</Heading>
-                <Text fontSize="lg" color="gray.600" textAlign="center">
-                    新しい議論を始めるか、保存した議論の続きから始めることができます
-                </Text>
+            <Button 
+                variant="ghost" 
+                position="absolute" 
+                top={4} 
+                left={4}
+                onClick={() => navigate('/')}
+            >
+                ← ホーム
+            </Button>
+            
+            <VStack gap={4} textAlign="center">
+                <Heading size="2xl">開始方法を選択</Heading>
+                <Text color="fg.muted">新しい議論を始めるか、保存された議論を再開できます</Text>
             </VStack>
             
-            <VStack gap={6} width="100%" maxWidth="400px">
+            <VStack gap={4} width="100%">
                 <Button 
-                    colorScheme="green" 
-                    size="xl" 
-                    onClick={() => navigate('/sessions')}
+                    colorPalette="green" 
+                    variant="solid"
+                    size="lg" 
                     width="100%"
-                    height="80px"
-                    fontSize="lg"
-                >
-                    📂 続きから始める
-                </Button>
-                <Text fontSize="sm" color="gray.500" textAlign="center">
-                    保存された議論セッションから選択
-                </Text>
-                
-                <Button 
-                    colorScheme="blue" 
-                    variant="outline"
-                    size="xl" 
                     onClick={() => navigate('/config')}
-                    width="100%"
-                    height="80px"
-                    fontSize="lg"
                 >
-                    ✨ 新しく始める
+                    新しく始める
                 </Button>
-                <Text fontSize="sm" color="gray.500" textAlign="center">
-                    新しい議論テーマとAI参加者を設定
-                </Text>
-            </VStack>
-            
-            <HStack gap={4} mt={8}>
                 <Button 
-                    variant="ghost" 
-                    size="md"
-                    onClick={() => navigate('/')}
+                    colorPalette="blue" 
+                    variant="outline"
+                    size="lg" 
+                    width="100%"
+                    onClick={() => navigate('/sessions')}
                 >
-                    🏠 ホームに戻る
+                    続きから始める
                 </Button>
-            </HStack>
+            </VStack>
         </VStack>
     );
 }

@@ -15,12 +15,15 @@ const system = createSystem(defaultConfig, {
     },
   },
   theme: {
-    tokens: {
-      fonts: {
-        body: { value: 'var(--font-bricolage-grotesque)' },
-      },
-    },
     semanticTokens: {
+      colors: {
+        brand: {
+          solid: { value: '{colors.green.500}' },
+          subtle: { value: '{colors.green.50}' },
+          muted: { value: '{colors.green.100}' },
+          emphasized: { value: '{colors.green.600}' },
+        },
+      },
       radii: {
         l1: { value: '0.25rem' },
         l2: { value: '0.375rem' },

@@ -41,7 +41,7 @@ interface DiscussionAnalysis {
 
 const PlayPage: React.FC = () => {
   const navigate = useNavigate();
-  const { generateAIResponse, summarizeDiscussion, analyzeDiscussionPoints } = useAIModel();
+  const { generateAIResponse, summarizeDiscussion, analyzeDiscussionPoints, isModelLoaded, isGenerating, error } = useAIModel();
   
   const [config, setConfig] = useState<AIConfig | null>(null);
   const [messages, setMessages] = useState<DiscussionMessage[]>([]);
@@ -130,7 +130,12 @@ const PlayPage: React.FC = () => {
   };
 
   const handleUserSubmit = async () => {
-    if (!userInput.trim() || isProcessing) return;
+    if (!userInput.trim() || isProcessing) {
+      console.log('🚫 ユーザー発言スキップ:', { userInput: userInput.trim(), isProcessing });
+      return;
+    }
+
+    console.log('📝 ユーザー発言開始:', userInput.trim());
 
     const userMessage: DiscussionMessage = {
       speaker: 'ユーザー',
@@ -157,8 +162,15 @@ const PlayPage: React.FC = () => {
       checkAndAnalyze();
     }, 1000);
     
+    console.log('🤖 AI応答開始...');
     // AI応答を順番に処理
-    await processAITurn();
+    try {
+      await processAITurn();
+      console.log('✅ AI応答完了');
+    } catch (error) {
+      console.error('❌ AI応答エラー:', error);
+      alert('AI応答でエラーが発生しました: ' + error);
+    }
   };
 
   // 要約が必要かチェックし、実行する関数
@@ -214,7 +226,17 @@ const PlayPage: React.FC = () => {
   };
 
   const processAITurn = async () => {
-    if (!config) return;
+    if (!config) {
+      console.log('🚫 processAITurn: configがありません');
+      return;
+    }
+    
+    console.log('🤖 processAITurn開始:', { 
+      aiCount: config.aiData.length, 
+      currentTurn, 
+      isProcessing,
+      totalTurns 
+    });
     
     setIsProcessing(true);
     
@@ -243,55 +265,84 @@ const PlayPage: React.FC = () => {
       };
 
       let latestMessages = await getCurrentMessages();
+      console.log('📝 現在のメッセージ数:', latestMessages.length);
       
       for (let i = 0; i < config.aiData.length; i++) {
         const ai = config.aiData[i];
+        console.log(`🤖 ${ai.name}の応答を生成中... (${i + 1}/${config.aiData.length})`);
         setCurrentTurn(i + 1);
         
-        // 効率的な会話履歴を構築（要約 + 直近の会話）
-        const recentConversation = latestMessages.slice(-RECENT_TURNS_TO_KEEP)
-          .map(msg => `${msg.speaker}: ${msg.message}`)
-          .join('\n');
-        
-        // フェーズ情報を含む会話履歴
-        const phaseInstruction = getPhaseInstruction(discussionPhase, totalTurns);
-        const conversationHistory = summarizedHistory 
-          ? `${summarizedHistory}\n\n【直近の会話】\n${recentConversation}\n\n【議論フェーズ】\n${phaseInstruction}`
-          : `${recentConversation}\n\n【議論フェーズ】\n${phaseInstruction}`;
+        try {
+          // 効率的な会話履歴を構築（要約 + 直近の会話）
+          const recentConversation = latestMessages.slice(-RECENT_TURNS_TO_KEEP)
+            .map(msg => `${msg.speaker}: ${msg.message}`)
+            .join('\n');
+          
+          // フェーズ情報を含む会話履歴
+          const phaseInstruction = getPhaseInstruction(discussionPhase, totalTurns);
+          const conversationHistory = summarizedHistory 
+            ? `${summarizedHistory}\n\n【直近の会話】\n${recentConversation}\n\n【議論フェーズ】\n${phaseInstruction}`
+            : `${recentConversation}\n\n【議論フェーズ】\n${phaseInstruction}`;
 
-        const response = await generateAIResponse(
-          ai.name,
-          ai.role,
-          ai.description,
-          conversationHistory,
-          config.discussionTopic
-        );
+          console.log(`📤 ${ai.name}にリクエスト送信:`, {
+            topic: config.discussionTopic,
+            historyLength: conversationHistory.length,
+            phase: discussionPhase
+          });
 
-        const aiMessage: DiscussionMessage = {
-          speaker: ai.name,
-          message: response,
-          isUser: false,
-          timestamp: new Date()
-        };
+          const response = await generateAIResponse(
+            ai.name,
+            ai.role,
+            ai.description,
+            conversationHistory,
+            config.discussionTopic
+          );
 
-        // メッセージを追加し、最新状態を更新
-        latestMessages = [...latestMessages, aiMessage];
-        setMessages(latestMessages);
-        setRecentMessages(prev => [...prev.slice(-RECENT_TURNS_TO_KEEP + 1), aiMessage]);
-        setTotalTurns(prev => prev + 1);
-        
-        // 次のAIまで少し待機
-        if (i < config.aiData.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          console.log(`📥 ${ai.name}の応答受信:`, response.substring(0, 100) + '...');
+
+          const aiMessage: DiscussionMessage = {
+            speaker: ai.name,
+            message: response,
+            isUser: false,
+            timestamp: new Date()
+          };
+
+          // メッセージを追加し、最新状態を更新
+          latestMessages = [...latestMessages, aiMessage];
+          setMessages(latestMessages);
+          setRecentMessages(prev => [...prev.slice(-RECENT_TURNS_TO_KEEP + 1), aiMessage]);
+          setTotalTurns(prev => prev + 1);
+          
+          console.log(`✅ ${ai.name}の応答完了`);
+          
+          // 次のAIまで少し待機
+          if (i < config.aiData.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+        } catch (aiError) {
+          console.error(`❌ ${ai.name}の応答エラー:`, aiError);
+          // エラーメッセージをUIに表示
+          const errorMessage: DiscussionMessage = {
+            speaker: ai.name,
+            message: `[エラー: 応答を生成できませんでした - ${aiError}]`,
+            isUser: false,
+            timestamp: new Date()
+          };
+          
+          latestMessages = [...latestMessages, errorMessage];
+          setMessages(latestMessages);
         }
       }
       
       // 全AIの発言が終わったらユーザーのターンに戻る
       setCurrentTurn(config.participate ? 0 : 1);
+      console.log('🔄 全AI応答完了、ターン切り替え:', config.participate ? 'ユーザー' : 'AI継続');
     } catch (error) {
-      console.error('AI応答エラー:', error);
+      console.error('❌ processAITurn全体エラー:', error);
+      alert('AI応答の処理中にエラーが発生しました: ' + error);
     } finally {
       setIsProcessing(false);
+      console.log('🏁 processAITurn完了');
     }
   };
 
@@ -441,6 +492,22 @@ const PlayPage: React.FC = () => {
               テーマ: {config.discussionTopic}
             </Text>
           )}
+          {/* デバッグ情報 */}
+          {import.meta.env.DEV && (
+            <HStack gap={2} fontSize="xs">
+              <Badge colorScheme={isModelLoaded ? "green" : "red"}>
+                Model: {isModelLoaded ? "Loaded" : "Not Loaded"}
+              </Badge>
+              <Badge colorScheme={isGenerating ? "blue" : "gray"}>
+                {isGenerating ? "Generating..." : "Ready"}
+              </Badge>
+              {error && (
+                <Badge colorScheme="red">
+                  Error: {error.message}
+                </Badge>
+              )}
+            </HStack>
+          )}
         </VStack>
         <HStack gap={2}>
           {messages.length > 0 && (
@@ -453,8 +520,8 @@ const PlayPage: React.FC = () => {
               💾 セッション保存
             </Button>
           )}
-          <Button onClick={() => navigate('/config')} size="sm">
-            設定に戻る
+          <Button onClick={() => navigate('/sessions')} size="sm" variant="ghost">
+            ← セッション一覧
           </Button>
         </HStack>
       </HStack>
@@ -775,6 +842,12 @@ const PlayPage: React.FC = () => {
                     ? `${config.aiData[currentTurn - 1].name}が考え中...` 
                     : 'AI応答を生成中...'}
                 </Text>
+                {/* デバッグ情報 */}
+                {import.meta.env.DEV && (
+                  <Text fontSize="xs" color="gray.500" mt={1}>
+                    Debug: currentTurn={currentTurn}, isGenerating={isGenerating}, isModelLoaded={isModelLoaded}
+                  </Text>
+                )}
               </Box>
             )}
           </Box>
@@ -783,6 +856,11 @@ const PlayPage: React.FC = () => {
           {config.participate && currentTurn === 0 && !isProcessing && (
             <VStack width="100%" gap={2}>
               <Text fontWeight="bold">あなたのターンです</Text>
+              {!isModelLoaded && (
+                <Text fontSize="sm" color="red.500">
+                  ⚠️ AIモデルが準備できていません。Ollamaが起動しているか確認してください。
+                </Text>
+              )}
               <Text fontSize="sm" color="gray.600">
                 💡 議論を深めるヒント: 
                 {discussionPhase === 'exploration' ? '多様な視点や疑問を提示してみてください' :
@@ -803,10 +881,10 @@ const PlayPage: React.FC = () => {
               <Button 
                 colorScheme="blue" 
                 onClick={handleUserSubmit}
-                disabled={!userInput.trim()}
+                disabled={!userInput.trim() || !isModelLoaded}
                 width="full"
               >
-                発言する
+                {!isModelLoaded ? 'Ollamaが起動していません' : '発言する'}
               </Button>
             </VStack>
           )}

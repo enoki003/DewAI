@@ -1,18 +1,13 @@
 import React from "react";
-import { useNavigate } from 'r  return (
-    <VStack gap={6} align="center" padding={8} minH="100vh" justifyContent="flex-start">
-      <VStack gap={4} width="100%" align="center">
-        <Heading size="2xl">🛠️ 議論の設定</Heading>
-        <Text fontSize="md" color="gray.600">議論のテーマとAI参加者を設定してください</Text>
-      </VStack>t-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   VStack,
+  HStack,
   Heading,
   Text,
   Button,
   Input,
   Textarea,
-  Stack,
   FieldRoot,
   FieldLabel,
   NumberInputRoot,
@@ -62,52 +57,71 @@ function Config() {
   };
 
   return (
-    <VStack gap={6} align="center" padding={8} minH="100vh" justifyContent="flex-start">
-      <Heading size="4xl">議論の設定</Heading>
-      <Text fontSize="2xl">シチュエーション、テーマ、役職を決定します</Text>
-
-      <FieldRoot>
-        <FieldLabel>議論のテーマ</FieldLabel>
-        <Input
-          value={discussionTopic}
-          onChange={(e) => setDiscussionTopic(e.target.value)}
-          placeholder="例: 環境問題への対応策について"
-        />
-      </FieldRoot>
-
-      <FieldRoot>
-        <FieldLabel>何人のAIと議論しますか？</FieldLabel>
-        <NumberInputRoot
-          value={String(numAI)}
-          onValueChange={(valueObj) => {
-            const newValue = valueObj.value; // オブジェクトからvalueプロパティを取得
-            setNumAI(newValue ? Number(newValue) : 1);
-            console.log("ナンバー入力が変更されました:", newValue);
-          }}
-          min={1}
-          max={5}
-        >
-          <NumberInputInput />
-          <NumberInputControl>
-            <NumberInputIncrementTrigger />
-            <NumberInputDecrementTrigger/>
-          </NumberInputControl>
-        </NumberInputRoot>
-      </FieldRoot>
-
-      <Button colorScheme="blue" onClick={handleSubmit}>
-        決定
+    <VStack gap={8} align="center" padding={8} minH="100vh">
+      <Button 
+        variant="ghost" 
+        position="absolute" 
+        top={4} 
+        left={4}
+        onClick={() => navigate('/start')}
+      >
+        ← 戻る
       </Button>
+      
+      <VStack gap={4} textAlign="center" maxW="2xl">
+        <Heading size="2xl">議論の設定</Heading>
+        <Text color="fg.muted">シチュエーション、テーマ、役職を決定します</Text>
+      </VStack>
+
+      <VStack gap={6} width="100%" maxW="2xl">
+        <FieldRoot>
+          <FieldLabel>議論のテーマ</FieldLabel>
+          <Input
+            value={discussionTopic}
+            onChange={(e) => setDiscussionTopic(e.target.value)}
+            placeholder="例: 環境問題への対応策について"
+          />
+        </FieldRoot>
+
+        <FieldRoot>
+          <FieldLabel>何人のAIと議論しますか？</FieldLabel>
+          <HStack gap={4}>
+            <NumberInputRoot
+              value={String(numAI)}
+              onValueChange={(valueObj) => {
+                const newValue = valueObj.value;
+                setNumAI(newValue ? Number(newValue) : 1);
+              }}
+              min={1}
+              max={5}
+              flex={1}
+            >
+              <NumberInputInput />
+              <NumberInputControl>
+                <NumberInputIncrementTrigger />
+                <NumberInputDecrementTrigger/>
+              </NumberInputControl>
+            </NumberInputRoot>
+            <Button 
+              colorPalette="green" 
+              variant="solid"
+              onClick={handleSubmit}
+            >
+              決定
+            </Button>
+          </HStack>
+        </FieldRoot>
+      </VStack>
 
       {showFields && (
-        <VStack gap={6} width="100%">
+        <VStack gap={6} width="100%" maxW="2xl">
           {aiData.map((ai, index) => (
-            <CardRoot key={index} width="100%" maxW="600px" boxShadow="lg">
-              <CardHeader fontWeight="bold" fontSize="xl">
-                AI {index + 1}
+            <CardRoot key={index} width="100%" variant="outline">
+              <CardHeader>
+                <Heading size="md">AI {index + 1}</Heading>
               </CardHeader>
               <CardBody>
-                <Stack direction="column" gap={4}>
+                <VStack gap={4}>
                   <FieldRoot>
                     <FieldLabel>名前</FieldLabel>
                     <Input
@@ -139,54 +153,57 @@ function Config() {
                         newAiData[index].description = e.target.value;
                         setAiData(newAiData);
                       }}
+                      rows={3}
                     />
                   </FieldRoot>
-                </Stack>
+                </VStack>
               </CardBody>
             </CardRoot>
           ))}
         </VStack>
       )}
 
-      <FieldRoot width="100%" maxW="600px">
-        <CheckboxRoot>
-          <CheckboxHiddenInput
-            checked={!participate}
-            onChange={(e) => setParticipate(!e.target.checked)}
-          />
-          <CheckboxControl />
-          <CheckboxLabel>私は参加しません</CheckboxLabel>
-        </CheckboxRoot>
-      </FieldRoot>
+      <VStack gap={6} width="100%" maxW="2xl">
+        <FieldRoot>
+          <CheckboxRoot>
+            <CheckboxHiddenInput
+              checked={!participate}
+              onChange={(e) => setParticipate(!e.target.checked)}
+            />
+            <CheckboxControl />
+            <CheckboxLabel>私は参加しません</CheckboxLabel>
+          </CheckboxRoot>
+        </FieldRoot>
 
-      <Button 
-        colorScheme="blue" 
-        size="lg" 
-        onClick={() => {
-          // AIデータを検証してからPlayページに遷移
-          const validAiData = aiData.filter(ai => ai.name && ai.role && ai.description);
-          if (validAiData.length === 0) {
-            alert('最低1人のAIの設定を完了してください');
-            return;
-          }
-          
-          if (!discussionTopic.trim()) {
-            alert('議論のテーマを入力してください');
-            return;
-          }
-          
-          // AIデータを localStorage に保存
-          localStorage.setItem('aiConfig', JSON.stringify({
-            aiData: validAiData,
-            participate: participate,
-            discussionTopic: discussionTopic.trim()
-          }));
-          
-          navigate('/play');
-        }}
-      >
-        開始
-      </Button>
+        <Button 
+          colorPalette="green" 
+          variant="solid"
+          size="lg" 
+          width="100%"
+          onClick={() => {
+            const validAiData = aiData.filter(ai => ai.name && ai.role && ai.description);
+            if (validAiData.length === 0) {
+              alert('最低1人のAIの設定を完了してください');
+              return;
+            }
+            
+            if (!discussionTopic.trim()) {
+              alert('議論のテーマを入力してください');
+              return;
+            }
+            
+            localStorage.setItem('aiConfig', JSON.stringify({
+              aiData: validAiData,
+              participate: participate,
+              discussionTopic: discussionTopic.trim()
+            }));
+            
+            navigate('/play');
+          }}
+        >
+          開始
+        </Button>
+      </VStack>
     </VStack>
   );
 }

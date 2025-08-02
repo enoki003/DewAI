@@ -1,4 +1,4 @@
-import { Box, VStack, HStack, Text, Button, CardRoot, CardBody, Spinner } from '@chakra-ui/react';
+import { Box, VStack, HStack, Text, Button, CardRoot, CardBody, Spinner, Heading } from '@chakra-ui/react';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
@@ -93,30 +93,24 @@ export default function SessionsPage() {
   };
 
   return (
-    <VStack height="100vh" p={6} gap={6} bg={{ base: "gray.50", _dark: "gray.900" }}>
-      {/* ヘッダー */}
-      <HStack width="100%" justify="space-between" align="center">
-        <Text fontSize="2xl" fontWeight="bold" color={{ base: "gray.800", _dark: "gray.100" }}>
-          🗂️ 議論セッション管理
-        </Text>
-        <HStack gap={3}>
-          <Button 
-            colorScheme="blue" 
-            onClick={() => navigate('/config')}
-          >
-            新しく始める
-          </Button>
-          <Button 
-            variant="outline" 
-            onClick={() => navigate('/start')}
-          >
-            戻る
-          </Button>
-        </HStack>
-      </HStack>
+    <VStack height="100vh" p={6} gap={6}>
+      <Button 
+        variant="ghost" 
+        position="absolute" 
+        top={4} 
+        left={4}
+        onClick={() => navigate('/start')}
+      >
+        ← 戻る
+      </Button>
+      
+      <VStack gap={4} textAlign="center" maxW="2xl" mx="auto">
+        <Heading size="2xl">議論セッション管理</Heading>
+        <Text color="fg.muted">保存された議論から続きを選択してください</Text>
+      </VStack>
 
       {/* セッション一覧 */}
-      <Box width="100%" maxW="800px" flex={1}>
+      <Box width="100%" maxW="2xl" mx="auto" flex={1}>
         {loading ? (
           <VStack justify="center" align="center" height="200px">
             <Spinner size="lg" />
@@ -124,9 +118,10 @@ export default function SessionsPage() {
           </VStack>
         ) : sessions.length === 0 ? (
           <VStack justify="center" align="center" height="200px" gap={4}>
-            <Text fontSize="lg" color="gray.500">保存されたセッションはありません</Text>
+            <Text color="fg.muted">保存されたセッションがありません</Text>
             <Button 
-              colorScheme="green" 
+              colorPalette="green" 
+              variant="solid"
               onClick={() => navigate('/config')}
             >
               新しい議論を始める
@@ -135,41 +130,34 @@ export default function SessionsPage() {
         ) : (
           <VStack gap={4} width="100%">
             {sessions.map((session) => (
-              <CardRoot 
-                key={session.id} 
-                width="100%" 
-                bg={{ base: "white", _dark: "gray.800" }}
-                shadow="md"
-                _hover={{ shadow: "lg", transform: "translateY(-2px)" }}
-                transition="all 0.2s"
-              >
+              <CardRoot key={session.id} width="100%">
                 <CardBody>
                   <VStack align="stretch" gap={3}>
                     <HStack justify="space-between" align="flex-start">
                       <VStack align="stretch" flex={1} gap={2}>
                         <Text 
-                          fontSize="lg" 
                           fontWeight="bold"
                           color={{ base: "gray.800", _dark: "gray.100" }}
                         >
-                          📋 {session.topic}
+                          {session.topic}
                         </Text>
                         <HStack gap={4} color="gray.500" fontSize="sm">
-                          <Text>💬 {getMessageCount(session.messages)}メッセージ</Text>
-                          <Text>📅 {formatDate(session.updated_at)}</Text>
+                          <Text>{getMessageCount(session.messages)}メッセージ</Text>
+                          <Text>{formatDate(session.updated_at)}</Text>
                         </HStack>
                       </VStack>
                       <HStack gap={2}>
                         <Button 
                           size="sm" 
-                          colorScheme="green"
+                          colorPalette="green"
+                          variant="solid"
                           onClick={() => continueSession(session)}
                         >
                           続きから
                         </Button>
                         <Button 
                           size="sm" 
-                          colorScheme="red" 
+                          colorPalette="red" 
                           variant="outline"
                           onClick={() => deleteSession(session.id)}
                         >

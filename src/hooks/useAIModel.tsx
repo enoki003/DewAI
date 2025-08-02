@@ -47,11 +47,11 @@ export function useAIModel() {
     setIsGenerating(true);
     try {
       return await invoke<string>('generate_ai_response', {
-        name,
+        participantName: name,
         role,
         description,
-        conversationHistory,
-        discussionTopic,
+        conversationHistory: conversationHistory,
+        discussionTopic: discussionTopic,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -90,8 +90,8 @@ export function useAIModel() {
     setIsGenerating(true);
     try {
       return await invoke<string>('summarize_discussion', {
-        discussionTopic,
-        conversationHistory,
+        discussionTopic: discussionTopic,
+        conversationHistory: conversationHistory,
         participants,
       });
     } catch (err) {
@@ -111,8 +111,8 @@ export function useAIModel() {
     setIsGenerating(true);
     try {
       return await invoke<string>('analyze_discussion_points', {
-        discussionTopic,
-        conversationHistory,
+        discussionTopic: discussionTopic,
+        conversationHistory: conversationHistory,
         participants,
       });
     } catch (err) {

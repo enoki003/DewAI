@@ -4,98 +4,11 @@ use tauri::command;
 use reqwest::Client;
 use serde_json::json;
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::PathBuf;
-use chrono::{DateTime, Utc};
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SavedSession {
-    pub id// セッション管理のためのヘルパー関数
-fn get_sessions_dir() -> Result<PathBuf, String> {
-    let mut path = std::env::current_exe()
-        .map_err(|e| format!("実行ファイルのパス取得失敗: {}", e))?;
-    path.pop(); // dewai.exe を削除
-    path.push("sessions"); // sessions フォルダを追加
-    
-    // ディレクトリが存在しない場合は作成
-    if !path.exists() {
-        fs::create_dir_all(&path)
-            .map_err(|e| format!("sessionsディレクトリ作成失敗: {}", e))?;
-    }
-    
-    Ok(path)
-}
-
-fn load_all_sessions() -> Result<Vec<SavedSession>, String> {
-    let sessions_dir = get_sessions_dir()?;
-    let mut sessions = Vec::new();
-    
-    if sessions_dir.exists() {
-        let entries = fs::read_dir(&sessions_dir)
-            .map_err(|e| format!("sessionsディレクトリ読み込み失敗: {}", e))?;
-        
-        for entry in entries {
-            let entry = entry.map_err(|e| format!("ファイルエントリ読み込み失敗: {}", e))?;
-            let path = entry.path();
-            
-            if path.extension().and_then(|s| s.to_str()) == Some("json") {
-                match fs::read_to_string(&path) {
-                    Ok(content) => {
-                        match serde_json::from_str::<SavedSession>(&content) {
-                            Ok(session) => sessions.push(session),
-                            Err(e) => println!("⚠️ セッションファイル解析失敗 {:?}: {}", path, e),
-                        }
-                    }
-                    Err(e) => println!("⚠️ セッションファイル読み込み失敗 {:?}: {}", path, e),
-                }
-            }
-        }
-    }
-    
-    // IDでソート（新しい順）
-    sessions.sort_by(|a, b| b.id.cmp(&a.id));
-    Ok(sessions)
-}
-
-fn save_session_to_file(session: &SavedSession) -> Result<(), String> {
-    let sessions_dir = get_sessions_dir()?;
-    let file_path = sessions_dir.join(format!("session_{}.json", session.id));
-    
-    let json_content = serde_json::to_string_pretty(session)
-        .map_err(|e| format!("セッションのJSON変換失敗: {}", e))?;
-    
-    fs::write(&file_path, json_content)
-        .map_err(|e| format!("セッションファイル保存失敗: {}", e))?;
-    
-    println!("💾 セッションファイル保存完了: {:?}", file_path);
-    Ok(())
-}
-
-// 議論セッションを保存
-#[command]
-async fn save_discussion_session(
-    topic: String,
-    participants: String,
-    messages: String,
-) -> Result<String, String> {
-    println!("💾 議論セッション保存: {}", topic);
-    
-    let now = Utc::now();
-    let session_id = now.timestamp();
-    let timestamp = now.format("%Y-%m-%d %H:%M:%S").to_string();
-    
-    let session = SavedSession {
-        id: session_id,
-        topic: topic.clone(),
-        participants,
-        messages,
-        created_at: timestamp.clone(),
-        updated_at: timestamp,
-    };
-    
-    save_session_to_file(&session)?;
-    Ok(format!("session_{}", session_id))
-}topic: String,
+    pub id: i64,
+    pub topic: String,
     pub participants: String, // JSON string
     pub messages: String, // JSON string
     pub created_at: String,
@@ -154,20 +67,21 @@ async fn generate_text(prompt: String) -> Result<String, String> {
 // AI応答生成（XMLフォーマットプロンプト＋generate_text）
 #[command]
 async fn generate_ai_response(
-    name: String,
+    participant_name: String,
     role: String,
     description: String,
     conversation_history: String,
     discussion_topic: String,
 ) -> Result<String, String> {
-    println!("🤖 generate_ai_response 呼び出し: {}", name);
+    println!("🤖 generate_ai_response 呼び出し: participant_name={}, role={}, description={}, conversation_history={}, discussion_topic={}", 
+        participant_name, role, description, conversation_history, discussion_topic);
     
     let xml_prompt = format!(
         r#"<discussion_context>
 <discussion_topic>{discussion_topic}</discussion_topic>
 
 <participant>
-<name>{name}</name>
+<name>{participant_name}</name>
 <role>{role}</role>
 <description>{description}</description>
 </participant>
@@ -202,7 +116,7 @@ async fn generate_ai_response(
 </discussion_guidelines>
 
 <instructions>
-あなたは{name}という{role}です。{description}
+あなたは{participant_name}という{role}です。{description}
 
 議論のテーマは「{discussion_topic}」です。
 上記のdiscussion_guidelinesに従い、議論を深める発言をしてください。
@@ -214,16 +128,16 @@ async fn generate_ai_response(
 - 「ユーザー」が質問をしている場合は、質問に対する自分の立場を明確に表明する
 - 「ユーザー」が意見を述べている場合は、その意見に対して賛成・反対・補足などの反応をする
 - 具体例、疑問、仮定、検証のいずれかを含める
-- {name}らしい視点と口調を維持
+- {participant_name}らしい視点と口調を維持
 - 議論を前進させる内容にする
 - 人間の参加者（ユーザー）の意見を尊重し、適切に応答する
 
-回答は{name}の発言内容のみを返してください。説明や注釈は不要です。
+回答は{participant_name}の発言内容のみを返してください。説明や注釈は不要です。
 日本語で250文字程度で発言してください。
 </instructions>
 </discussion_context>"#,
         discussion_topic = discussion_topic,
-        name = name,
+        participant_name = participant_name,
         role = role, 
         description = description,
         conversation_history = if conversation_history.is_empty() { 
@@ -434,7 +348,20 @@ async fn save_discussion_session(
 #[command]
 async fn get_saved_sessions() -> Result<Vec<SavedSession>, String> {
     println!("📚 保存済みセッション一覧取得");
-    load_all_sessions()
+    
+    // 一時的にダミーデータを返す
+    let sessions = vec![
+        SavedSession {
+            id: 1,
+            topic: "AIの倫理について".to_string(),
+            participants: "[\"哲学者\", \"技術者\", \"倫理学者\"]".to_string(),
+            messages: "[]".to_string(),
+            created_at: "2024-01-01 10:00:00".to_string(),
+            updated_at: "2024-01-01 11:00:00".to_string(),
+        }
+    ];
+    
+    Ok(sessions)
 }
 
 // 特定のセッションを取得
@@ -442,29 +369,26 @@ async fn get_saved_sessions() -> Result<Vec<SavedSession>, String> {
 async fn get_session_by_id(session_id: i64) -> Result<SavedSession, String> {
     println!("📖 セッション取得: ID {}", session_id);
     
-    let sessions = load_all_sessions()?;
-    for session in sessions {
-        if session.id == session_id {
-            return Ok(session);
-        }
-    }
-    
-    Err(format!("セッション ID {} が見つかりません", session_id))
+    // 一時的にダミーデータを返す
+    Ok(SavedSession {
+        id: session_id,
+        topic: "AIの倫理について".to_string(),
+        participants: "[\"哲学者\", \"技術者\", \"倫理学者\"]".to_string(),
+        messages: "[]".to_string(),
+        created_at: "2024-01-01 10:00:00".to_string(),
+        updated_at: "2024-01-01 11:00:00".to_string(),
+    })
 }
 
 // セッションを更新（会話を継続した場合）
 #[command]
 async fn update_discussion_session(
     session_id: i64,
-    messages: String,
+    _messages: String,
 ) -> Result<(), String> {
     println!("📝 セッション更新: ID {}", session_id);
     
-    let mut session = get_session_by_id(session_id).await?;
-    session.messages = messages;
-    session.updated_at = Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    
-    save_session_to_file(&session)?;
+    // 一時的に何もしない
     Ok(())
 }
 
@@ -473,17 +397,7 @@ async fn update_discussion_session(
 async fn delete_session(session_id: i64) -> Result<(), String> {
     println!("🗑️ セッション削除: ID {}", session_id);
     
-    let sessions_dir = get_sessions_dir()?;
-    let file_path = sessions_dir.join(format!("session_{}.json", session_id));
-    
-    if file_path.exists() {
-        fs::remove_file(&file_path)
-            .map_err(|e| format!("セッションファイル削除失敗: {}", e))?;
-        println!("🗑️ セッションファイル削除完了: {:?}", file_path);
-    } else {
-        println!("⚠️ セッションファイルが見つかりません: {:?}", file_path);
-    }
-    
+    // 一時的に何もしない
     Ok(())
 }
 
