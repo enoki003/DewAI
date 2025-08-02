@@ -1,5 +1,10 @@
 import React from "react";
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'r  return (
+    <VStack gap={6} align="center" padding={8} minH="100vh" justifyContent="flex-start">
+      <VStack gap={4} width="100%" align="center">
+        <Heading size="2xl">🛠️ 議論の設定</Heading>
+        <Text fontSize="md" color="gray.600">議論のテーマとAI参加者を設定してください</Text>
+      </VStack>t-router-dom';
 import {
   VStack,
   Heading,

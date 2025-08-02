@@ -81,6 +81,48 @@ export function useAIModel() {
     }
   }
 
+  async function summarizeDiscussion(
+    discussionTopic: string,
+    conversationHistory: string,
+    participants: string[]
+  ): Promise<string> {
+    if (!isModelLoaded) throw new Error('モデルがロードされていません');
+    setIsGenerating(true);
+    try {
+      return await invoke<string>('summarize_discussion', {
+        discussionTopic,
+        conversationHistory,
+        participants,
+      });
+    } catch (err) {
+      console.error('要約エラー:', err);
+      throw err;
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
+  async function analyzeDiscussionPoints(
+    discussionTopic: string,
+    conversationHistory: string,
+    participants: string[]
+  ): Promise<string> {
+    if (!isModelLoaded) throw new Error('モデルがロードされていません');
+    setIsGenerating(true);
+    try {
+      return await invoke<string>('analyze_discussion_points', {
+        discussionTopic,
+        conversationHistory,
+        participants,
+      });
+    } catch (err) {
+      console.error('議論分析エラー:', err);
+      throw err;
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
   return {
     isModelLoaded,
     isGenerating,
@@ -88,5 +130,7 @@ export function useAIModel() {
     generateText,
     generateAIResponse,
     startDiscussion,
+    summarizeDiscussion,
+    analyzeDiscussionPoints,
   };
 }
