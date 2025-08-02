@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Box, 
   VStack, 
@@ -76,6 +76,49 @@ const PlayPage: React.FC = () => {
   // 議論分析システム用の状態
   const [discussionAnalysis, setDiscussionAnalysis] = useState<DiscussionAnalysis | null>(null);
   const [showAnalysis, setShowAnalysis] = useState(false);
+  
+  // 自動スクロール制御用の状態
+  const messageAreaRef = useRef<HTMLDivElement>(null);
+  const [isUserScrolling, setIsUserScrolling] = useState(false);
+  const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
+  const scrollTimeoutRef = useRef<number | null>(null);
+
+  // 自動スクロール関数
+  const scrollToBottom = useCallback(() => {
+    if (messageAreaRef.current && shouldAutoScroll && !isUserScrolling) {
+      messageAreaRef.current.scrollTop = messageAreaRef.current.scrollHeight;
+    }
+  }, [shouldAutoScroll, isUserScrolling]);
+
+  // ユーザーによる手動スクロールを検出
+  const handleScroll = useCallback(() => {
+    if (!messageAreaRef.current) return;
+    
+    const { scrollTop, scrollHeight, clientHeight } = messageAreaRef.current;
+    const isAtBottom = Math.abs(scrollHeight - scrollTop - clientHeight) < 10;
+    
+    // スクロール位置に基づいて自動スクロールのON/OFFを制御
+    setShouldAutoScroll(isAtBottom);
+    
+    // ユーザーがスクロール中であることを示すフラグ
+    setIsUserScrolling(true);
+    
+    // スクロール終了を検出するためのタイマー
+    if (scrollTimeoutRef.current) {
+      clearTimeout(scrollTimeoutRef.current);
+    }
+    scrollTimeoutRef.current = window.setTimeout(() => {
+      setIsUserScrolling(false);
+    }, 150);
+  }, []);
+
+  // メッセージが変更された時の自動スクロール
+  useEffect(() => {
+    if (messages.length > 0) {
+      // 少し遅延を入れて確実にDOMが更新された後にスクロール
+      setTimeout(scrollToBottom, 100);
+    }
+  }, [messages, scrollToBottom]);
   
   const TURNS_BEFORE_SUMMARY = 4; // 要約を実行するターン数（少し長めに）
   const RECENT_TURNS_TO_KEEP = 4; // 保持する直近ターン数
@@ -494,18 +537,39 @@ const PlayPage: React.FC = () => {
   }
 
   return (
-    <VStack gap={4} p={6} height="100vh">
+    <Box height="100vh" display="flex" flexDirection="column">
+      {/* メインコンテンツエリア */}
+      <VStack 
+        gap={{ base: 2, md: 4 }} 
+        p={{ base: 3, md: 6 }} 
+        flex="1" 
+        overflow="hidden"
+        pb={{ base: "220px", md: "200px" }} // 下部入力エリア分のパディングをさらに増加
+      >
       {/* ヘッダー */}
-      <Box width="100%" borderBottom="1px solid" borderColor="border.muted" pb={4}>
-        <HStack justify="space-between" align="center" width="100%">
-          <Button onClick={() => navigate('/')} size="sm" variant="ghost">
+      <Box width="100%" borderBottom="1px solid" borderColor="border.muted" pb={{ base: 2, md: 4 }}>
+        <Stack 
+          direction={{ base: "column", md: "row" }}
+          justify="space-between" 
+          align={{ base: "start", md: "center" }}
+          width="100%"
+          gap={{ base: 2, md: 0 }}
+        >
+          <Button onClick={() => navigate('/')} size={{ base: "xs", md: "sm" }} variant="ghost">
             ← 戻る
           </Button>
-          <Text fontSize="xl" fontWeight="bold">テーマ: {config.discussionTopic}</Text>
-          <HStack gap={2} minWidth="120px" justify="flex-end">
+          <Text 
+            fontSize={{ base: "md", md: "xl" }} 
+            fontWeight="bold"
+            textAlign={{ base: "left", md: "center" }}
+            flex={{ base: "none", md: "1" }}
+          >
+            テーマ: {config.discussionTopic}
+          </Text>
+          <HStack gap={2} minWidth={{ base: "auto", md: "120px" }} justify="flex-end">
             {(messages.length > 0 || discussionStarted) && (
               <Button 
-                size="sm" 
+                size={{ base: "xs", md: "sm" }}
                 colorPalette="green" 
                 variant="outline"
                 onClick={saveCurrentSession}
@@ -515,18 +579,25 @@ const PlayPage: React.FC = () => {
               </Button>
             )}
           </HStack>
-        </HStack>
+        </Stack>
 
       </Box>
 
       {/* 参加者表示 */}
-      <HStack wrap="wrap" gap={2} justify="space-between" width="100%">
-        <HStack wrap="wrap" gap={2}>
+      <Stack 
+        direction={{ base: "column", lg: "row" }}
+        wrap="wrap" 
+        gap={2} 
+        justify="space-between" 
+        width="100%"
+      >
+        <HStack wrap="wrap" gap={2} flex="1">
           {participants.map((participant, index) => (
             <Badge
               key={index}
               colorPalette={currentTurn === index ? "green" : "gray"}
               variant={currentTurn === index ? "solid" : "outline"}
+              size={{ base: "sm", md: "md" }}
             >
               {participant.name} ({participant.role})
             </Badge>
@@ -534,42 +605,40 @@ const PlayPage: React.FC = () => {
         </HStack>
         
         {/* 要約システム情報 */}
-        <HStack gap={2}>
-          <Badge colorPalette="green" variant="outline">
+        <HStack gap={1} wrap="wrap" justify={{ base: "start", lg: "end" }}>
+          <Badge colorPalette="green" variant="outline" size={{ base: "sm", md: "md" }}>
             ターン: {totalTurns}
           </Badge>
           <Badge 
-            colorPalette={
-              discussionPhase === 'exploration' ? 'green' : 
-              discussionPhase === 'deepening' ? 'green' : 'green'
-            } 
+            colorPalette="green"
             variant="outline"
+            size={{ base: "sm", md: "md" }}
           >
             {discussionPhase === 'exploration' ? '探索' : 
              discussionPhase === 'deepening' ? '深化' : '統合'}フェーズ
           </Badge>
           {summarizedHistory && (
-            <Badge colorPalette="green" variant="outline">
+            <Badge colorPalette="green" variant="outline" size={{ base: "sm", md: "md" }}>
               要約済み
             </Badge>
           )}
         </HStack>
-      </HStack>
+      </Stack>
 
       {/* 現在の争点表示 */}
       {currentTopics.length > 0 && (
         <Box 
           width="100%" 
-          p={3} 
+          p={{ base: 2, md: 3 }}
           bg="green.subtle" 
           borderRadius="md" 
           border="1px solid" 
           borderColor="green.muted"
         >
-          <Text fontSize="sm" fontWeight="bold" mb={2}>🎯 現在の議論の争点:</Text>
+          <Text fontSize={{ base: "xs", md: "sm" }} fontWeight="bold" mb={2}>🎯 現在の議論の争点:</Text>
           <HStack wrap="wrap" gap={1}>
             {currentTopics.map((topic, index) => (
-              <Badge key={index} colorPalette="green" variant="subtle" size="sm">
+              <Badge key={index} colorPalette="green" variant="subtle" size={{ base: "xs", md: "sm" }}>
                 {topic}
               </Badge>
             ))}
@@ -580,7 +649,7 @@ const PlayPage: React.FC = () => {
       {/* 議論分析ボタン */}
       <HStack width="100%" justify="center" gap={3}>
         <Button 
-          size="sm" 
+          size={{ base: "sm", md: "md" }}
           colorPalette="green" 
           variant={showAnalysis ? "solid" : "outline"}
           onClick={() => {
@@ -591,49 +660,68 @@ const PlayPage: React.FC = () => {
             }
           }}
         >
-          {showAnalysis ? '分析パネルを閉じる' : '議論分析パネルを開く'}
+          <Text display={{ base: "none", md: "block" }}>
+            {showAnalysis ? '分析パネルを閉じる' : '議論分析パネルを開く'}
+          </Text>
+          <Text display={{ base: "block", md: "none" }}>
+            {showAnalysis ? '分析を閉じる' : '📊 分析'}
+          </Text>
         </Button>
       </HStack>
 
       {/* 議論開始前 */}
       {!discussionStarted && (
-        <VStack gap={4} flex={1} justify="center">
-          <Text fontSize="lg">議論の準備ができました</Text>
-          <Text>参加者: {participants.length}人</Text>
-          <Button colorPalette="green" size="lg" onClick={startDiscussion}>
-            議論開始
-          </Button>
+        <VStack gap={4} flex={1} justify="center" p={{ base: 4, md: 0 }}>
+          <Text fontSize={{ base: "md", md: "lg" }}>議論の準備ができました</Text>
+          <Text fontSize={{ base: "sm", md: "md" }}>参加者: {participants.length}人</Text>
+          <VStack gap={2}>
+            <Text fontSize={{ base: "xs", md: "sm" }} color="fg.muted" textAlign="center">
+              💬 {config.participate ? '下部の入力エリアから議論を開始できます' : '下部のボタンから自動議論を開始できます'}
+            </Text>
+            <Text fontSize={{ base: "xs", md: "sm" }} color="fg.muted" textAlign="center">
+              🎯 テーマ: {config.discussionTopic}
+            </Text>
+          </VStack>
         </VStack>
       )}
 
-      {/* 議論中 - サイドパネル形式 */}
+      {/* 議論中 - レスポンシブレイアウト */}
       {discussionStarted && (
-        <HStack gap={4} flex={1} align="stretch" width="100%">
+        <Stack 
+          direction={{ base: "column", lg: "row" }}
+          gap={4} 
+          flex={1} 
+          align="stretch" 
+          width="100%"
+        >
           {/* メッセージ履歴エリア */}
           <Box 
-            flex={showAnalysis ? "2" : "1"}
-            minHeight="400px"
-            maxHeight="600px"
+            ref={messageAreaRef}
+            onScroll={handleScroll}
+            flex={{ base: "1", lg: showAnalysis ? "2" : "1" }}
+            minHeight={{ base: "200px", md: "300px" }}
+            maxHeight={{ base: "calc(100vh - 500px)", lg: "calc(100vh - 450px)" }}
             overflowY="auto" 
             border="1px solid" 
             borderColor="border.muted" 
             borderRadius="md" 
-            p={4}
+            p={{ base: 2, md: 4 }}
             transition="all 0.3s"
+            mb={{ base: 4, md: 0 }} // メッセージエリアに下部マージン追加
           >
             {messages.map((msg, index) => (
               <Box 
                 key={index} 
-                mb={3}
+                mb={{ base: 2, md: 3 }}
                 display="flex"
                 justifyContent={msg.isUser ? "flex-end" : "flex-start"}
                 alignItems="flex-start"
               >
                 <Box
-                  maxWidth="75%"
+                  maxWidth={{ base: "85%", md: "75%" }}
                   bg={msg.isUser ? "green.solid" : "bg.muted"}
                   color={msg.isUser ? "green.contrast" : "fg"}
-                  p={3}
+                  p={{ base: 2, md: 3 }}
                   borderRadius="18px"
                   borderBottomRightRadius={msg.isUser ? "4px" : "18px"}
                   borderBottomLeftRadius={msg.isUser ? "18px" : "4px"}
@@ -644,7 +732,7 @@ const PlayPage: React.FC = () => {
                   <Text fontSize="xs" fontWeight="bold" mb={1} opacity={0.7}>
                     {msg.isUser ? 'あなた' : msg.speaker}
                   </Text>
-                  <Text fontSize="sm" lineHeight="1.4">{msg.message}</Text>
+                  <Text fontSize={{ base: "xs", md: "sm" }} lineHeight="1.4">{msg.message}</Text>
                   <Text fontSize="xs" opacity={0.5} mt={2} textAlign="right">
                     {msg.timestamp.toLocaleTimeString()}
                   </Text>
@@ -662,23 +750,46 @@ const PlayPage: React.FC = () => {
                 </Text>
               </Box>
             )}
+            
+            {/* メッセージエリア内の下部スペーサー（固定入力エリア分の余白） */}
+            <Box height={{ base: "20px", md: "30px" }} />
+            
+            {/* 自動スクロール制御ボタン（底部にいない場合のみ表示） */}
+            {!shouldAutoScroll && messages.length > 0 && (
+              <Box position="sticky" bottom={2} textAlign="center" mt={2}>
+                <Button
+                  size="sm"
+                  colorPalette="green"
+                  variant="solid"
+                  onClick={() => {
+                    setShouldAutoScroll(true);
+                    scrollToBottom();
+                  }}
+                  boxShadow="md"
+                >
+                  ↓ 最新メッセージへ
+                </Button>
+              </Box>
+            )}
           </Box>
 
-          {/* 分析パネル */}
+          {/* デスクトップ用分析パネル */}
           {showAnalysis && (
             <Box 
+              display={{ base: "none", lg: "block" }}
               flex="1"
               minWidth="350px"
-              maxHeight="600px"
+              maxHeight="calc(100vh - 450px)"
               overflowY="auto"
-              p={4} 
+              p={4}
               bg="green.subtle" 
               borderRadius="md" 
+              mb={4} // 分析パネルにも下部マージン追加 
               border="1px solid" 
               borderColor="green.muted"
             >
               <HStack justify="space-between" align="center" mb={3}>
-                <Text fontSize="lg" fontWeight="bold" color="green.fg">📊 議論分析結果</Text>
+                <Text fontSize={{ base: "md", md: "lg" }} fontWeight="bold" color="green.fg">📊 議論分析結果</Text>
                 {messages.length > 2 && (
                   <Button 
                     size="xs" 
@@ -829,53 +940,319 @@ const PlayPage: React.FC = () => {
               )}
             </Box>
           )}
-        </HStack>
+        </Stack>
       )}
 
-      {/* ユーザー入力エリア */}
-      {discussionStarted && config.participate && currentTurn === 0 && !isProcessing && (
-        <VStack width="100%" gap={2}>
-          <Text fontWeight="bold">あなたのターンです</Text>
-          {!isModelLoaded && (
-            <Text fontSize="sm" color="red.solid">
-              ⚠️ AIモデルが準備できていません。Ollamaが起動しているか確認してください。
-            </Text>
-          )}
-          <Text fontSize="sm" color="fg.muted">
-            💡 議論を深めるヒント: 
-            {discussionPhase === 'exploration' ? '多様な視点や疑問を提示してみてください' :
-             discussionPhase === 'deepening' ? '具体例や根拠を示して論点を深掘りしてください' :
-             '解決策や結論に向けた提案をしてみてください'}
-          </Text>
-          <Textarea
-            value={userInput}
-            onChange={(e) => setUserInput(e.target.value)}
-            placeholder={
-              discussionPhase === 'exploration' ? "「なぜ〜なのでしょうか？」「もし〜だったら？」など..." :
-              discussionPhase === 'deepening' ? "「具体的には〜」「例えば〜」「実際には〜」など..." :
-              "「解決策として〜」「結論的には〜」「今後は〜」など..."
-            }
-            resize="none"
-            rows={3}
-          />
-          <Button 
-            colorPalette="green" 
-            onClick={handleUserSubmit}
-            disabled={!userInput.trim() || !isModelLoaded}
+      </VStack>
+
+      {/* モバイル用分析オーバーレイパネル */}
+      {showAnalysis && (
+        <Box
+          display={{ base: "block", lg: "none" }}
+          position="fixed"
+          top="0"
+          left="0"
+          right="0"
+          bottom="0"
+          bg="blackAlpha.600"
+          zIndex="modal"
+          onClick={() => setShowAnalysis(false)}
+        >
+          <Box
+            position="absolute"
+            top="50%"
+            left="50%"
+            transform="translate(-50%, -50%)"
+            bg="bg"
+            borderRadius="lg"
+            border="1px solid"
+            borderColor="border.muted"
+            boxShadow="xl"
+            maxWidth="90vw"
+            maxHeight="80vh"
             width="full"
+            onClick={(e) => e.stopPropagation()}
           >
-            {!isModelLoaded ? 'Ollamaが起動していません' : '発言する'}
-          </Button>
-        </VStack>
+            {/* モバイル用ヘッダー */}
+            <HStack
+              justify="space-between"
+              align="center"
+              p={4}
+              borderBottom="1px solid"
+              borderColor="border.muted"
+            >
+              <Text fontSize="lg" fontWeight="bold" color="green.fg">📊 議論分析結果</Text>
+              <HStack gap={2}>
+                {messages.length > 2 && (
+                  <Button 
+                    size="xs" 
+                    colorPalette="green" 
+                    variant="outline"
+                    onClick={() => {
+                      analyzeCurrentDiscussion();
+                    }}
+                    disabled={isProcessing}
+                  >
+                    {isProcessing ? '分析中...' : '更新'}
+                  </Button>
+                )}
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={() => setShowAnalysis(false)}
+                >
+                  ✕
+                </Button>
+              </HStack>
+            </HStack>
+
+            {/* モバイル用分析内容 */}
+            <Box
+              p={4}
+              maxHeight="calc(80vh - 80px)"
+              overflowY="auto"
+            >
+              {/* 分析データがない場合の表示 */}
+              {!discussionAnalysis && (
+                <Box textAlign="center" py={8}>
+                  <Text color="fg.muted" mb={3}>まだ分析データがありません</Text>
+                  {messages.length > 2 ? (
+                    <Button 
+                      size="sm" 
+                      colorPalette="green" 
+                      onClick={analyzeCurrentDiscussion}
+                      disabled={isProcessing}
+                    >
+                      {isProcessing ? '分析中...' : '議論を分析する'}
+                    </Button>
+                  ) : (
+                    <Text fontSize="sm" color="fg.muted">
+                      議論が進むと分析できるようになります
+                    </Text>
+                  )}
+                </Box>
+              )}
+
+              {/* 分析データがある場合の表示 */}
+              {discussionAnalysis && (
+                <>
+                  {/* 主要論点 */}
+                  {discussionAnalysis.mainPoints && discussionAnalysis.mainPoints.length > 0 && (
+                    <Box mb={4}>
+                      <Text fontSize="md" fontWeight="bold" mb={2} color="green.fg">🎯 主要論点</Text>
+                      {discussionAnalysis.mainPoints.map((point, index) => (
+                        <Box 
+                          key={index} 
+                          mb={2} 
+                          p={3} 
+                          bg="green.subtle" 
+                          borderRadius="md" 
+                          borderLeft="4px solid" 
+                          borderColor="green.solid"
+                        >
+                          <Text fontWeight="semibold" fontSize="sm">{point.point}</Text>
+                          <Text fontSize="xs" color="fg.muted" mt={1}>{point.description}</Text>
+                        </Box>
+                      ))}
+                    </Box>
+                  )}
+
+                  {/* 参加者の立場 */}
+                  {discussionAnalysis.participantStances && discussionAnalysis.participantStances.length > 0 && (
+                    <Box mb={4}>
+                      <Text fontSize="md" fontWeight="bold" mb={2} color="green.fg">👥 各参加者の立場</Text>
+                      {discussionAnalysis.participantStances.map((stance, index) => (
+                        <Box key={index} mb={3} p={3} bg="green.subtle" borderRadius="md">
+                          <Text fontWeight="bold" fontSize="sm" color="green.fg">
+                            {stance.participant === 'ユーザー' ? 'あなた' : stance.participant}
+                          </Text>
+                          <Text fontSize="sm" mt={1}>{stance.stance}</Text>
+                          {stance.keyArguments && stance.keyArguments.length > 0 && (
+                            <Box mt={2}>
+                              <Text fontSize="xs" color="fg.muted" mb={1}>主な論拠:</Text>
+                              {stance.keyArguments.map((arg, argIndex) => (
+                                <Text key={argIndex} fontSize="xs" color="fg.subtle" ml={2}>
+                                  • {arg}
+                                </Text>
+                              ))}
+                            </Box>
+                          )}
+                        </Box>
+                      ))}
+                    </Box>
+                  )}
+
+                  {/* 対立点 */}
+                  {discussionAnalysis.conflicts && discussionAnalysis.conflicts.length > 0 && (
+                    <Box mb={4}>
+                      <Text fontSize="md" fontWeight="bold" mb={2} color="green.fg">⚔️ 主な対立点</Text>
+                      {discussionAnalysis.conflicts.map((conflict, index) => (
+                        <Box 
+                          key={index} 
+                          mb={2} 
+                          p={3} 
+                          bg="red.subtle"
+                          borderRadius="md" 
+                          borderLeft="4px solid" 
+                          borderColor="red.solid"
+                        >
+                          <Text fontWeight="semibold" fontSize="sm">{conflict.issue}</Text>
+                          <Text fontSize="xs" color="fg.muted" mt={1}>{conflict.description}</Text>
+                          <HStack mt={2} gap={1} wrap="wrap">
+                            {conflict.sides && conflict.sides.map((side, sideIndex) => (
+                              <Badge key={sideIndex} colorPalette="red" variant="subtle" size="xs">
+                                {side}
+                              </Badge>
+                            ))}
+                          </HStack>
+                        </Box>
+                      ))}
+                    </Box>
+                  )}
+
+                  {/* 共通認識 */}
+                  {discussionAnalysis.commonGround && discussionAnalysis.commonGround.length > 0 && (
+                    <Box mb={4}>
+                      <Text fontSize="md" fontWeight="bold" mb={2} color="green.fg">🤝 共通認識</Text>
+                      {discussionAnalysis.commonGround.map((common, index) => (
+                        <Box 
+                          key={index} 
+                          mb={2} 
+                          p={3} 
+                          bg="green.subtle"
+                          borderRadius="md" 
+                          borderLeft="4px solid" 
+                          borderColor="green.solid"
+                        >
+                          <Text fontSize="sm">{common}</Text>
+                        </Box>
+                      ))}
+                    </Box>
+                  )}
+
+                  {/* 未探索領域 */}
+                  {discussionAnalysis.unexploredAreas && discussionAnalysis.unexploredAreas.length > 0 && (
+                    <Box>
+                      <Text fontSize="md" fontWeight="bold" mb={2} color="green.fg">🔍 未探索の論点</Text>
+                      <HStack wrap="wrap" gap={1}>
+                        {discussionAnalysis.unexploredAreas.map((area, index) => (
+                          <Badge key={index} colorPalette="green" variant="subtle" size="sm">
+                            {area}
+                          </Badge>
+                        ))}
+                      </HStack>
+                    </Box>
+                  )}
+                </>
+              )}
+            </Box>
+          </Box>
+        </Box>
       )}
 
-      {/* AI自動議論モード */}
-      {discussionStarted && !config.participate && !isProcessing && (
-        <Button colorPalette="green" onClick={processAITurn}>
-          次の発言を生成
-        </Button>
-      )}
-    </VStack>
+      {/* 固定下部入力エリア */}
+      <Box 
+        borderTop="1px solid" 
+        borderColor="border.muted" 
+        bg="bg" 
+        p={{ base: 3, md: 4 }}
+        width="100%"
+      >
+        {/* ユーザー入力エリア */}
+        {config.participate && (
+          <VStack width="100%" gap={2}>
+            {currentTurn === 0 && !isProcessing ? (
+              <>
+                <Text fontWeight="bold" fontSize={{ base: "sm", md: "md" }}>あなたのターンです</Text>
+                {!isModelLoaded && (
+                  <Text fontSize={{ base: "xs", md: "sm" }} color="red.solid">
+                    ⚠️ AIモデルが準備できていません。Ollamaが起動しているか確認してください。
+                  </Text>
+                )}
+                <Text fontSize={{ base: "xs", md: "sm" }} color="fg.muted">
+                  💡 議論を深めるヒント: 
+                  {discussionPhase === 'exploration' ? '多様な視点や疑問を提示してみてください' :
+                   discussionPhase === 'deepening' ? '具体例や根拠を示して論点を深掘りしてください' :
+                   '解決策や結論に向けた提案をしてみてください'}
+                </Text>
+              </>
+            ) : (
+              <Text fontSize={{ base: "sm", md: "md" }} color="fg.muted" textAlign="center">
+                {isProcessing ? 'AI応答を生成中...' : 
+                 !discussionStarted ? '議論を開始してください' :
+                 'AIのターンです'}
+              </Text>
+            )}
+            
+            <Textarea
+              value={userInput}
+              onChange={(e) => setUserInput(e.target.value)}
+              placeholder={
+                !discussionStarted ? "議論開始後に入力できます" :
+                currentTurn === 0 && !isProcessing ?
+                  (discussionPhase === 'exploration' ? "「なぜ〜なのでしょうか？」「もし〜だったら？」など..." :
+                   discussionPhase === 'deepening' ? "「具体的には〜」「例えば〜」「実際には〜」など..." :
+                   "「解決策として〜」「結論的には〜」「今後は〜」など...") :
+                "他の参加者のターンです"
+              }
+              resize="none"
+              rows={3}
+              fontSize={{ base: "sm", md: "md" }}
+              disabled={!discussionStarted || currentTurn !== 0 || isProcessing}
+            />
+            
+            <HStack width="100%" gap={2}>
+              <Button 
+                colorPalette="green" 
+                onClick={handleUserSubmit}
+                disabled={!userInput.trim() || !isModelLoaded || !discussionStarted || currentTurn !== 0 || isProcessing}
+                flex="1"
+                size={{ base: "sm", md: "md" }}
+              >
+                {!isModelLoaded ? 'Ollamaが起動していません' : 
+                 !discussionStarted ? '議論を開始してください' :
+                 currentTurn !== 0 ? 'AIのターンです' :
+                 isProcessing ? '処理中...' : '発言する'}
+              </Button>
+              
+              {/* AI自動議論モード用ボタン */}
+              {discussionStarted && !config.participate && !isProcessing && (
+                <Button 
+                  colorPalette="green" 
+                  onClick={processAITurn}
+                  size={{ base: "sm", md: "md" }}
+                  variant="outline"
+                >
+                  次の発言を生成
+                </Button>
+              )}
+            </HStack>
+          </VStack>
+        )}
+        
+        {/* ユーザーが参加しない場合のAI制御エリア */}
+        {!config.participate && (
+          <VStack width="100%" gap={2}>
+            <Text fontSize={{ base: "sm", md: "md" }} color="fg.muted" textAlign="center">
+              {isProcessing ? 'AI応答を生成中...' : 
+               !discussionStarted ? '議論を開始してください' :
+               'AI自動議論モード'}
+            </Text>
+            
+            <Button 
+              colorPalette="green" 
+              onClick={discussionStarted ? processAITurn : startDiscussion}
+              disabled={isProcessing}
+              size={{ base: "sm", md: "md" }}
+              width="100%"
+            >
+              {!discussionStarted ? '議論開始' :
+               isProcessing ? '処理中...' : '次の発言を生成'}
+            </Button>
+          </VStack>
+        )}
+      </Box>
+    </Box>
   );
 };
 
