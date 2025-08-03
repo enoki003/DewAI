@@ -2,6 +2,11 @@ import { Box, VStack, HStack, Text, Button, CardRoot, CardBody, Spinner, Heading
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
+import { 
+  showSessionDeleteSuccess, 
+  showSessionDeleteError,
+  showGenericError 
+} from '../components/ui/notifications';
 
 interface SavedSession {
   id: number;
@@ -35,7 +40,7 @@ export default function SessionsPage() {
       setSessions(savedSessions);
     } catch (error) {
       console.error('セッション取得エラー:', error);
-      alert('セッションの取得に失敗しました');
+      showGenericError('セッションの取得に失敗しました', `エラー詳細: ${error}`);
     } finally {
       setLoading(false);
     }
@@ -61,20 +66,20 @@ export default function SessionsPage() {
       
     } catch (error) {
       console.error('セッション復元エラー:', error);
-      alert('セッションの復元に失敗しました');
+      showGenericError('セッションの復元に失敗しました', `エラー詳細: ${error}`);
     }
   };
 
-  const deleteSession = async (sessionId: number) => {
+  const deleteSession = async (sessionId: number, sessionTopic: string) => {
     if (!confirm('このセッションを削除しますか？')) return;
     
     try {
       await invoke('delete_session', { sessionId });
-      alert('セッションを削除しました');
+      showSessionDeleteSuccess(sessionTopic);
       loadSessions(); // リストを再読み込み
     } catch (error) {
       console.error('削除エラー:', error);
-      alert('セッションの削除に失敗しました');
+      showSessionDeleteError(`${error}`);
     }
   };
 
@@ -105,7 +110,7 @@ export default function SessionsPage() {
       </Button>
       
       <VStack gap={4} textAlign="center" maxW="2xl" mx="auto">
-        <Heading size="2xl">議論セッション管理</Heading>
+        <Heading size="2xl">過去の議論セッション</Heading>
         <Text color="fg.muted">保存された議論から続きを選択してください</Text>
       </VStack>
 
@@ -159,7 +164,7 @@ export default function SessionsPage() {
                           size="sm" 
                           colorPalette="red" 
                           variant="outline"
-                          onClick={() => deleteSession(session.id)}
+                          onClick={() => deleteSession(session.id, session.topic)}
                         >
                           削除
                         </Button>

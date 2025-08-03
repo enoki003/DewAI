@@ -1,5 +1,10 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { 
+  showOllamaConnectionError, 
+  showModelLoadSuccess,
+  showAnalysisError 
+} from '../components/ui/notifications';
 
 interface AIModelError {
   message: string;
@@ -15,12 +20,16 @@ export function useAIModel() {
       try {
         const loaded = await invoke<boolean>('is_model_loaded');
         setIsModelLoaded(loaded);
-        if (!loaded) {
+        if (loaded) {
+          showModelLoadSuccess();
+        } else {
+          showOllamaConnectionError();
           setTimeout(checkModelStatus, 2000);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         setError({ message });
+        showOllamaConnectionError();
       }
     };
     checkModelStatus();
@@ -117,6 +126,7 @@ export function useAIModel() {
       });
     } catch (err) {
       console.error('議論分析エラー:', err);
+      showAnalysisError('議論分析', `${err}`);
       throw err;
     } finally {
       setIsGenerating(false);

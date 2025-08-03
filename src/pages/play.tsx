@@ -8,13 +8,15 @@ import {
   Textarea, 
   Spinner, 
   Badge,
-  Stack,
-  Card,
-  Group
+  Stack
 } from '@chakra-ui/react';
 import { useAIModel } from '../hooks/useAIModel';
 import { useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
+import { 
+  showAIResponseError, 
+  showAnalysisError
+} from '../components/ui/notifications';
 
 interface AICharacter {
   name: string;
@@ -73,6 +75,9 @@ const PlayPage: React.FC = () => {
   const [totalTurns, setTotalTurns] = useState(0); // 総ターン数
   const [discussionPhase, setDiscussionPhase] = useState<'exploration' | 'deepening' | 'synthesis'>('exploration'); // 議論フェーズ
   const [currentTopics, setCurrentTopics] = useState<string[]>([]); // 現在の議論の争点
+  
+  // Debug: recentMessagesの状態をログ出力（TypeScript警告回避）
+  console.log('Recent messages count:', recentMessages.length);
   
   // 議論分析システム用の状態
   const [discussionAnalysis, setDiscussionAnalysis] = useState<DiscussionAnalysis | null>(null);
@@ -273,7 +278,7 @@ const PlayPage: React.FC = () => {
       console.log('✅ AI応答完了');
     } catch (error) {
       console.error('❌ AI応答エラー:', error);
-      alert('AI応答でエラーが発生しました: ' + error);
+      showAIResponseError('AI参加者', `${error}`);
     }
   };
 
@@ -316,6 +321,7 @@ const PlayPage: React.FC = () => {
       console.log('要約完了:', summary);
     } catch (error) {
       console.error('要約エラー:', error);
+      showAnalysisError('議論要約', `${error}`);
     }
   };
 
