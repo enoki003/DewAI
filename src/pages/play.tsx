@@ -76,6 +76,15 @@ const PlayPage: React.FC = () => {
   
   // 議論分析システム用の状態
   const [discussionAnalysis, setDiscussionAnalysis] = useState<DiscussionAnalysis | null>(null);
+  
+  // デバッグ用：分析結果が更新された時のログ
+  useEffect(() => {
+    if (discussionAnalysis) {
+      console.log('📊 議論分析結果更新:', discussionAnalysis);
+      console.log('📊 mainPoints:', discussionAnalysis.mainPoints);
+      console.log('📊 participantStances:', discussionAnalysis.participantStances);
+    }
+  }, [discussionAnalysis]);
   const [showAnalysis, setShowAnalysis] = useState(false);
   
   // 自動スクロール制御用の状態
@@ -229,11 +238,21 @@ const PlayPage: React.FC = () => {
       timestamp: new Date()
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
     setRecentMessages(prev => [...prev, userMessage]);
     setUserInput('');
     setCurrentTurn(1); // 次はAIのターン
     setTotalTurns(prev => prev + 1);
+    
+    console.log('👤 ユーザー発言処理完了、自動保存実行前:', {
+      messageCount: updatedMessages.length,
+      currentSessionId,
+      isResumedSession
+    });
+    
+    // ユーザー発言後に自動保存（更新されたメッセージ配列を渡す）
+    await autoSaveSession(updatedMessages);
     
     // 議論フェーズの自動調整（ユーザー発言時も）
     if (totalTurns > 8 && discussionPhase === 'exploration') {
@@ -422,6 +441,15 @@ const PlayPage: React.FC = () => {
       // 全AIの発言が終わったらユーザーのターンに戻る
       setCurrentTurn(config.participate ? 0 : 1);
       console.log('🔄 全AI応答完了、ターン切り替え:', config.participate ? 'ユーザー' : 'AI継続');
+      
+      console.log('🤖 AIターン処理完了、自動保存実行前:', {
+        messageCount: latestMessages.length,
+        currentSessionId,
+        isResumedSession
+      });
+      
+      // AIターン終了時に自動保存（最新のメッセージ配列を渡す）
+      await autoSaveSession(latestMessages);
     } catch (error) {
       console.error('❌ processAITurn全体エラー:', error);
       alert('AI応答の処理中にエラーが発生しました: ' + error);
@@ -503,9 +531,44 @@ const PlayPage: React.FC = () => {
         
         console.log('🧹 クリーニング後:', cleanedResult);
         
-        const parsedAnalysis: DiscussionAnalysis = JSON.parse(cleanedResult);
-        setDiscussionAnalysis(parsedAnalysis);
-        console.log('✅ 議論分析完了:', parsedAnalysis);
+        const parsedAnalysis = JSON.parse(cleanedResult);
+        console.log('🔍 パース結果の型チェック:', typeof parsedAnalysis, parsedAnalysis);
+        
+        // データ構造の検証
+        if (parsedAnalysis && typeof parsedAnalysis === 'object') {
+          // 必要なプロパティが存在するかチェック
+          const validAnalysis: DiscussionAnalysis = {
+            mainPoints: Array.isArray(parsedAnalysis.mainPoints) ? 
+              parsedAnalysis.mainPoints.filter((point: any) => 
+                point && typeof point === 'object' && 
+                typeof point.point === 'string' && 
+                typeof point.description === 'string'
+              ) : [],
+            participantStances: Array.isArray(parsedAnalysis.participantStances) ? 
+              parsedAnalysis.participantStances.filter((stance: any) => 
+                stance && typeof stance === 'object' && 
+                typeof stance.participant === 'string' && 
+                typeof stance.stance === 'string' &&
+                Array.isArray(stance.keyArguments)
+              ) : [],
+            conflicts: Array.isArray(parsedAnalysis.conflicts) ? 
+              parsedAnalysis.conflicts.filter((conflict: any) => 
+                conflict && typeof conflict === 'object' && 
+                typeof conflict.issue === 'string' && 
+                typeof conflict.description === 'string' &&
+                Array.isArray(conflict.sides)
+              ) : [],
+            commonGround: Array.isArray(parsedAnalysis.commonGround) ? 
+              parsedAnalysis.commonGround.filter((item: any) => typeof item === 'string') : [],
+            unexploredAreas: Array.isArray(parsedAnalysis.unexploredAreas) ? 
+              parsedAnalysis.unexploredAreas.filter((item: any) => typeof item === 'string') : []
+          };
+          
+          setDiscussionAnalysis(validAnalysis);
+          console.log('✅ 議論分析完了:', validAnalysis);
+        } else {
+          throw new Error('分析結果が有効なオブジェクトではありません');
+        }
       } catch (parseError) {
         console.error('❌ 分析結果のJSONパースに失敗:', parseError);
         console.log('Raw analysis result:', analysisResult);
@@ -520,12 +583,24 @@ const PlayPage: React.FC = () => {
     }
   };
 
-  // 会話を保存する関数
-  const saveCurrentSession = async () => {
-    console.log('💾 セッション保存開始:', { currentSessionId, isResumedSession, messageCount: messages.length });
+  // 自動セッション保存関数（サイレント）
+  const autoSaveSession = async (messagesToSave?: DiscussionMessage[]) => {
+    const currentMessages = messagesToSave || messages;
+    console.log('💾 自動セッション保存開始:', { 
+      currentSessionId, 
+      isResumedSession, 
+      messageCount: currentMessages.length,
+      hasConfig: !!config,
+      configTopic: config?.discussionTopic,
+      configAiData: config?.aiData?.length || 0,
+      usingPassedMessages: !!messagesToSave
+    });
     
-    if (!config || messages.length === 0) {
-      alert('保存できるデータがありません');
+    if (!config || currentMessages.length === 0) {
+      console.log('⏭️ 保存対象データなし、スキップ:', { 
+        hasConfig: !!config, 
+        messageCount: currentMessages.length 
+      });
       return;
     }
 
@@ -534,32 +609,37 @@ const PlayPage: React.FC = () => {
         ...(config.participate ? ['ユーザー'] : []),
         ...config.aiData.map(ai => ai.name)
       ];
+      
+      console.log('📦 保存データ準備完了:', {
+        participants: participants,
+        topic: config.discussionTopic,
+        messageCount: currentMessages.length,
+        messagesPreview: currentMessages.slice(-2).map(m => ({ speaker: m.speaker, message: m.message.substring(0, 50) + '...' }))
+      });
 
       if (currentSessionId && isResumedSession) {
         // 既存セッションの更新
         console.log('🔄 既存セッション更新中:', currentSessionId);
         await invoke('update_discussion_session', {
           sessionId: currentSessionId,
-          messages: JSON.stringify(messages)
+          messages: JSON.stringify(currentMessages)
         });
-        console.log('✅ セッション更新完了');
-        alert('セッションを更新しました');
+        console.log('✅ セッション更新完了（自動保存）');
       } else {
         // 新規セッションとして保存
         console.log('📝 新規セッション作成中... (currentSessionId:', currentSessionId, ', isResumedSession:', isResumedSession, ')');
         const sessionId = await invoke<number>('save_discussion_session', {
           topic: config.discussionTopic,
           participants: JSON.stringify(participants),
-          messages: JSON.stringify(messages)
+          messages: JSON.stringify(currentMessages)
         });
         setCurrentSessionId(sessionId);
         setIsResumedSession(true);
-        console.log('✅ 新規セッション作成完了:', sessionId);
-        alert(`新しいセッションとして保存しました (ID: ${sessionId})`);
+        console.log('✅ 新規セッション作成完了（自動保存）:', sessionId);
       }
     } catch (error) {
-      console.error('保存エラー:', error);
-      alert(`セッションの保存に失敗しました: ${error}`);
+      console.error('自動保存エラー:', error);
+      // サイレント処理のためアラートは出さない
     }
   };
 
@@ -603,17 +683,7 @@ const PlayPage: React.FC = () => {
             テーマ: {config.discussionTopic}
           </Text>
           <HStack gap={2} minWidth={{ base: "auto", md: "120px" }} justify="flex-end">
-            {(messages.length > 0 || discussionStarted) && (
-              <Button 
-                size={{ base: "xs", md: "sm" }}
-                colorPalette="green" 
-                variant="outline"
-                onClick={saveCurrentSession}
-                disabled={messages.length === 0}
-              >
-                💾 セッション保存
-              </Button>
-            )}
+            {/* 自動保存のため手動保存ボタンは削除 */}
           </HStack>
         </Stack>
 
@@ -880,8 +950,12 @@ const PlayPage: React.FC = () => {
                           borderLeft="4px solid" 
                           borderColor="green.solid"
                         >
-                          <Text fontWeight="semibold" fontSize="sm">{point.point}</Text>
-                          <Text fontSize="xs" color="fg.muted" mt={1}>{point.description}</Text>
+                          <Text fontWeight="semibold" fontSize="sm">
+                            {typeof point === 'object' && point && 'point' in point && typeof point.point === 'string' ? point.point : '論点情報なし'}
+                          </Text>
+                          <Text fontSize="xs" color="fg.muted" mt={1}>
+                            {typeof point === 'object' && point && 'description' in point && typeof point.description === 'string' ? point.description : '説明なし'}
+                          </Text>
                         </Box>
                       ))}
                     </Box>
@@ -894,15 +968,17 @@ const PlayPage: React.FC = () => {
                       {discussionAnalysis.participantStances.map((stance, index) => (
                         <Box key={index} mb={3} p={3} bg="bg.panel" borderRadius="md">
                           <Text fontWeight="bold" fontSize="sm" color="green.fg">
-                            {stance.participant === 'ユーザー' ? 'あなた' : stance.participant}
+                            {stance.participant === 'ユーザー' ? 'あなた' : (stance.participant || '参加者不明')}
                           </Text>
-                          <Text fontSize="sm" mt={1}>{stance.stance}</Text>
-                          {stance.keyArguments && stance.keyArguments.length > 0 && (
+                          <Text fontSize="sm" mt={1}>
+                            {typeof stance.stance === 'string' ? stance.stance : '立場情報なし'}
+                          </Text>
+                          {stance.keyArguments && Array.isArray(stance.keyArguments) && stance.keyArguments.length > 0 && (
                             <Box mt={2}>
                               <Text fontSize="xs" color="fg.muted" mb={1}>主な論拠:</Text>
                               {stance.keyArguments.map((arg, argIndex) => (
                                 <Text key={argIndex} fontSize="xs" color="fg.subtle" ml={2}>
-                                  • {arg}
+                                  • {typeof arg === 'string' ? arg : '論拠情報なし'}
                                 </Text>
                               ))}
                             </Box>

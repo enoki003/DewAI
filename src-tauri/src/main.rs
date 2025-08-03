@@ -63,7 +63,8 @@ async fn generate_text(prompt: String) -> Result<String, String> {
 
     let client = Client::new();
     let body = json!({
-        "model": "gemma3:4b", // モデル名（必要に応じて変えて）
+        "model": "gemma3:3b",
+        // "model": "yuiseki/sarashina2.2:1b", 
         "prompt": prompt,
         "stream": false
     });
@@ -120,7 +121,7 @@ async fn generate_ai_response(
 
 1. 前の発言者への適切な反応
    - 質問に対しては：「〜という問いについて、私は...」「この問題については...」
-   - 意見に対しては：「〜さんの〜という意見について」「先ほどの〜の件ですが」「〜の指摘は興味深いですね」
+   - 意見に対しては：「〜という意見について」「先ほどの〜の件ですが」「〜の指摘は興味深いですね」
 
 2. 深掘りの要素
    - 具体例や事例の提示
@@ -389,7 +390,8 @@ async fn save_discussion_session(
     participants: String,
     messages: String,
 ) -> Result<i64, String> {
-    println!("💾 議論セッション保存: {}", topic);
+    println!("💾 議論セッション保存開始: {}", topic);
+    println!("📊 保存データ詳細 - 参加者: {}, メッセージ数: {}", participants, messages.len());
     
     let mut storage_lock = state.storage.lock().unwrap();
     let mut storage = state.load_storage();
@@ -410,11 +412,17 @@ async fn save_discussion_session(
     
     storage.sessions.insert(session_id, session);
     
-    state.save_storage(&storage)?;
-    *storage_lock = storage;
-    
-    println!("✅ セッション保存完了: ID {}", session_id);
-    Ok(session_id)
+    match state.save_storage(&storage) {
+        Ok(_) => {
+            *storage_lock = storage;
+            println!("✅ セッション保存完了: ID {}", session_id);
+            Ok(session_id)
+        }
+        Err(e) => {
+            println!("❌ セッション保存失敗: {}", e);
+            Err(e)
+        }
+    }
 }
 
 // 保存された議論セッションの一覧を取得
@@ -454,7 +462,8 @@ async fn update_discussion_session(
     session_id: i64,
     messages: String,
 ) -> Result<(), String> {
-    println!("📝 セッション更新: ID {}", session_id);
+    println!("📝 セッション更新開始: ID {}", session_id);
+    println!("📊 更新データ詳細 - メッセージ数: {}", messages.len());
     
     let mut storage_lock = state.storage.lock().unwrap();
     let mut storage = state.load_storage();
@@ -463,13 +472,21 @@ async fn update_discussion_session(
         session.messages = messages;
         session.updated_at = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
         
-        state.save_storage(&storage)?;
-        *storage_lock = storage;
-        
-        println!("✅ セッション更新完了: ID {}", session_id);
-        Ok(())
+        match state.save_storage(&storage) {
+            Ok(_) => {
+                *storage_lock = storage;
+                println!("✅ セッション更新完了: ID {}", session_id);
+                Ok(())
+            }
+            Err(e) => {
+                println!("❌ セッション更新失敗: {}", e);
+                Err(e)
+            }
+        }
     } else {
-        Err(format!("更新するセッションが見つかりません: ID {}", session_id))
+        let error_msg = format!("更新するセッションが見つかりません: ID {}", session_id);
+        println!("❌ {}", error_msg);
+        Err(error_msg)
     }
 }
 
