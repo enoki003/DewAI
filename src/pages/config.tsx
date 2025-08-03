@@ -21,7 +21,6 @@ import {
   CheckboxRoot,
   CheckboxControl,
   CheckboxLabel,
-  CheckboxHiddenInput,
 } from "@chakra-ui/react";
 
 function Config() {
@@ -131,6 +130,7 @@ function Config() {
                         newAiData[index].name = e.target.value;
                         setAiData(newAiData);
                       }}
+                      placeholder="例: 田中太郎"
                     />
                   </FieldRoot>
                   <FieldRoot>
@@ -142,6 +142,7 @@ function Config() {
                         newAiData[index].role = e.target.value;
                         setAiData(newAiData);
                       }}
+                      placeholder="例: 環境政策専門家"
                     />
                   </FieldRoot>
                   <FieldRoot>
@@ -154,6 +155,7 @@ function Config() {
                         setAiData(newAiData);
                       }}
                       rows={3}
+                      placeholder="例: 20年以上環境問題に携わり、持続可能な開発に詳しい専門家。データに基づいた現実的な提案を重視する。"
                     />
                   </FieldRoot>
                 </VStack>
@@ -165,11 +167,10 @@ function Config() {
 
       <VStack gap={6} width="100%" maxW="2xl">
         <FieldRoot>
-          <CheckboxRoot>
-            <CheckboxHiddenInput
-              checked={!participate}
-              onChange={(e) => setParticipate(!e.target.checked)}
-            />
+          <CheckboxRoot
+            checked={!participate}
+            onCheckedChange={(details) => setParticipate(!details.checked)}
+          >
             <CheckboxControl />
             <CheckboxLabel>私は参加しません</CheckboxLabel>
           </CheckboxRoot>

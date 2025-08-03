@@ -65,6 +65,7 @@ const PlayPage: React.FC = () => {
   // セッション関連の状態
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
   const [isResumedSession, setIsResumedSession] = useState(false);
+  const [previousPage, setPreviousPage] = useState<string>('/start'); // 戻り先管理
   
   // 要約システム用の新しい状態
   const [summarizedHistory, setSummarizedHistory] = useState<string>(''); // 要約された過去の議論
@@ -130,21 +131,47 @@ const PlayPage: React.FC = () => {
       try {
         const parsed = JSON.parse(resumeData);
         if (parsed.isResume) {
-          // セッションを復元
-          setCurrentSessionId(parsed.sessionId);
-          setIsResumedSession(true);
-          setConfig({
-            discussionTopic: parsed.topic,
-            aiData: parsed.participants.filter((p: string) => p !== 'ユーザー').map((name: string) => ({
-              name,
-              role: '', // 復元時は簡略化
-              description: ''
-            })),
-            participate: parsed.participants.includes('ユーザー')
-          });
-          setMessages(parsed.messages);
-          setDiscussionStarted(true);
-          localStorage.removeItem('resumeSession'); // 一度使ったら削除
+          // データベースからセッション詳細を取得
+          const loadSessionFromDatabase = async () => {
+            try {
+              console.log('🔄 データベースからセッション復元中:', parsed.sessionId);
+              const sessionData: any = await invoke('get_session_by_id', { sessionId: parsed.sessionId });
+              console.log('📖 セッションデータ取得成功:', sessionData);
+              
+              // セッション設定を復元
+              console.log('🔧 セッション状態設定中... SessionID:', parsed.sessionId);
+              setCurrentSessionId(parsed.sessionId);
+              setIsResumedSession(true);
+              console.log('✅ セッション状態設定完了 (currentSessionId:', parsed.sessionId, ', isResumedSession: true)');
+              setConfig({
+                discussionTopic: sessionData.topic,
+                aiData: JSON.parse(sessionData.participants).filter((p: string) => p !== 'ユーザー').map((name: string) => ({
+                  name,
+                  role: '', // 復元時は簡略化
+                  description: ''
+                })),
+                participate: JSON.parse(sessionData.participants).includes('ユーザー')
+              });
+              
+              // メッセージを復元（データベースの最新データを使用）
+              const savedMessages = JSON.parse(sessionData.messages);
+              const messagesWithDateTimestamp = savedMessages.map((msg: any) => ({
+                ...msg,
+                timestamp: new Date(msg.timestamp)
+              }));
+              setMessages(messagesWithDateTimestamp);
+              setDiscussionStarted(true);
+              
+              console.log('✅ セッション復元完了:', messagesWithDateTimestamp.length, 'メッセージ');
+            } catch (error) {
+              console.error('❌ セッション復元失敗:', error);
+              // エラーの場合は通常の設定読み込みに進む
+            }
+            localStorage.removeItem('resumeSession'); // 一度使ったら削除
+          };
+          
+          loadSessionFromDatabase();
+          setPreviousPage('/sessions'); // セッション復元の場合は/sessionsに戻る
           return;
         }
       } catch (error) {
@@ -152,7 +179,7 @@ const PlayPage: React.FC = () => {
       }
     }
 
-    // 通常の設定データを読み込み
+    // 通常の設定データを読み込み（新規作成）
     const savedConfig = localStorage.getItem('aiConfig');
     if (!savedConfig) {
       navigate('/config');
@@ -161,7 +188,9 @@ const PlayPage: React.FC = () => {
     
     try {
       const parsedConfig: AIConfig = JSON.parse(savedConfig);
+      console.log('📋 設定データ読み込み成功:', parsedConfig);
       setConfig(parsedConfig);
+      setPreviousPage('/config'); // 新規作成の場合は/configに戻る
     } catch (error) {
       console.error('設定データの読み込みに失敗:', error);
       navigate('/config');
@@ -174,6 +203,7 @@ const PlayPage: React.FC = () => {
   ] : [];
 
   const startDiscussion = () => {
+    console.log('🎯 startDiscussion 呼び出し', { config, discussionStarted, isProcessing });
     if (!config?.participate) {
       // ユーザーが参加しない場合、AIだけで議論開始
       setCurrentTurn(1);
@@ -492,6 +522,8 @@ const PlayPage: React.FC = () => {
 
   // 会話を保存する関数
   const saveCurrentSession = async () => {
+    console.log('💾 セッション保存開始:', { currentSessionId, isResumedSession, messageCount: messages.length });
+    
     if (!config || messages.length === 0) {
       alert('保存できるデータがありません');
       return;
@@ -505,13 +537,16 @@ const PlayPage: React.FC = () => {
 
       if (currentSessionId && isResumedSession) {
         // 既存セッションの更新
+        console.log('🔄 既存セッション更新中:', currentSessionId);
         await invoke('update_discussion_session', {
           sessionId: currentSessionId,
           messages: JSON.stringify(messages)
         });
+        console.log('✅ セッション更新完了');
         alert('セッションを更新しました');
       } else {
         // 新規セッションとして保存
+        console.log('📝 新規セッション作成中... (currentSessionId:', currentSessionId, ', isResumedSession:', isResumedSession, ')');
         const sessionId = await invoke<number>('save_discussion_session', {
           topic: config.discussionTopic,
           participants: JSON.stringify(participants),
@@ -519,11 +554,12 @@ const PlayPage: React.FC = () => {
         });
         setCurrentSessionId(sessionId);
         setIsResumedSession(true);
-        alert('新しいセッションとして保存しました');
+        console.log('✅ 新規セッション作成完了:', sessionId);
+        alert(`新しいセッションとして保存しました (ID: ${sessionId})`);
       }
     } catch (error) {
       console.error('保存エラー:', error);
-      alert('セッションの保存に失敗しました');
+      alert(`セッションの保存に失敗しました: ${error}`);
     }
   };
 
@@ -555,7 +591,7 @@ const PlayPage: React.FC = () => {
           width="100%"
           gap={{ base: 2, md: 0 }}
         >
-          <Button onClick={() => navigate('/')} size={{ base: "xs", md: "sm" }} variant="ghost">
+          <Button onClick={() => navigate(previousPage)} size={{ base: "xs", md: "sm" }} variant="ghost">
             ← 戻る
           </Button>
           <Text 
@@ -674,6 +710,7 @@ const PlayPage: React.FC = () => {
         <VStack gap={4} flex={1} justify="center" p={{ base: 4, md: 0 }}>
           <Text fontSize={{ base: "md", md: "lg" }}>議論の準備ができました</Text>
           <Text fontSize={{ base: "sm", md: "md" }}>参加者: {participants.length}人</Text>
+          <Text fontSize="xs" color="fg.muted">設定状況: {config ? '✅' : '❌'}</Text>
           <VStack gap={2}>
             <Text fontSize={{ base: "xs", md: "sm" }} color="fg.muted" textAlign="center">
               💬 {config.participate ? '下部の入力エリアから議論を開始できます' : '下部のボタンから自動議論を開始できます'}
@@ -734,7 +771,7 @@ const PlayPage: React.FC = () => {
                   </Text>
                   <Text fontSize={{ base: "xs", md: "sm" }} lineHeight="1.4">{msg.message}</Text>
                   <Text fontSize="xs" opacity={0.5} mt={2} textAlign="right">
-                    {msg.timestamp.toLocaleTimeString()}
+                    {new Date(msg.timestamp).toLocaleTimeString()}
                   </Text>
                 </Box>
               </Box>
@@ -1202,18 +1239,30 @@ const PlayPage: React.FC = () => {
             />
             
             <HStack width="100%" gap={2}>
-              <Button 
-                colorPalette="green" 
-                onClick={handleUserSubmit}
-                disabled={!userInput.trim() || !isModelLoaded || !discussionStarted || currentTurn !== 0 || isProcessing}
-                flex="1"
-                size={{ base: "sm", md: "md" }}
-              >
-                {!isModelLoaded ? 'Ollamaが起動していません' : 
-                 !discussionStarted ? '議論を開始してください' :
-                 currentTurn !== 0 ? 'AIのターンです' :
-                 isProcessing ? '処理中...' : '発言する'}
-              </Button>
+              {!discussionStarted ? (
+                <Button 
+                  colorPalette="green" 
+                  onClick={startDiscussion}
+                  disabled={!isModelLoaded || isProcessing}
+                  flex="1"
+                  size={{ base: "sm", md: "md" }}
+                >
+                  {!isModelLoaded ? 'Ollamaが起動していません' : 
+                   isProcessing ? '処理中...' : '議論を開始する'}
+                </Button>
+              ) : (
+                <Button 
+                  colorPalette="green" 
+                  onClick={handleUserSubmit}
+                  disabled={!userInput.trim() || !isModelLoaded || currentTurn !== 0 || isProcessing}
+                  flex="1"
+                  size={{ base: "sm", md: "md" }}
+                >
+                  {!isModelLoaded ? 'Ollamaが起動していません' : 
+                   currentTurn !== 0 ? 'AIのターンです' :
+                   isProcessing ? '処理中...' : '発言する'}
+                </Button>
+              )}
               
               {/* AI自動議論モード用ボタン */}
               {discussionStarted && !config.participate && !isProcessing && (
@@ -1242,7 +1291,7 @@ const PlayPage: React.FC = () => {
             <Button 
               colorPalette="green" 
               onClick={discussionStarted ? processAITurn : startDiscussion}
-              disabled={isProcessing}
+              disabled={isProcessing || !config}
               size={{ base: "sm", md: "md" }}
               width="100%"
             >

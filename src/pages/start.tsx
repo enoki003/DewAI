@@ -26,7 +26,7 @@ function Start() {
             
             <VStack gap={4} textAlign="center">
                 <Heading size="2xl">開始方法を選択</Heading>
-                <Text color="fg.muted">新しい議論を始めるか、保存された議論を再開できます</Text>
+                <Text color="fg.muted">新しい議論を始めるか保存された議論を再開できます</Text>
             </VStack>
             
             <VStack gap={4} width="100%">
@@ -40,7 +40,7 @@ function Start() {
                     新しく始める
                 </Button>
                 <Button 
-                    colorPalette="blue" 
+                    colorPalette="green" 
                     variant="outline"
                     size="lg" 
                     width="100%"
