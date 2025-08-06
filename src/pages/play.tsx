@@ -12,11 +12,12 @@ import {
 } from '@chakra-ui/react';
 import { useAIModel } from '../hooks/useAIModel';
 import { useNavigate } from 'react-router-dom';
-import { invoke } from '@tauri-apps/api/core';
 import { 
   showAIResponseError, 
   showAnalysisError
 } from '../components/ui/notifications';
+import { ChatMessage } from '../components/ui/chat-message';
+import { saveSession, updateSession, getSessionById } from '../utils/database';
 
 interface AICharacter {
   name: string;
@@ -55,7 +56,7 @@ interface DiscussionAnalysis {
 
 const PlayPage: React.FC = () => {
   const navigate = useNavigate();
-    const { generateAIResponse, summarizeDiscussion, analyzeDiscussionPoints, isModelLoaded } = useAIModel();
+    const { generateAIResponse, summarizeDiscussion, analyzeDiscussionPoints, isModelLoaded, testGenerateText } = useAIModel();
   
   const [config, setConfig] = useState<AIConfig | null>(null);
   const [messages, setMessages] = useState<DiscussionMessage[]>([]);
@@ -68,6 +69,7 @@ const PlayPage: React.FC = () => {
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
   const [isResumedSession, setIsResumedSession] = useState(false);
   const [previousPage, setPreviousPage] = useState<string>('/start'); // 戻り先管理
+  const [isWaitingForResume, setIsWaitingForResume] = useState(false); // セッション復元時のAIターン待機状態
   
   // 要約システム用の新しい状態
   const [summarizedHistory, setSummarizedHistory] = useState<string>(''); // 要約された過去の議論
@@ -149,7 +151,12 @@ const PlayPage: React.FC = () => {
           const loadSessionFromDatabase = async () => {
             try {
               console.log('🔄 データベースからセッション復元中:', parsed.sessionId);
-              const sessionData: any = await invoke('get_session_by_id', { sessionId: parsed.sessionId });
+              const sessionData = await getSessionById(parsed.sessionId);
+              
+              if (!sessionData) {
+                throw new Error('セッションが見つかりません');
+              }
+              
               console.log('📖 セッションデータ取得成功:', sessionData);
               
               // セッション設定を復元
@@ -157,14 +164,40 @@ const PlayPage: React.FC = () => {
               setCurrentSessionId(parsed.sessionId);
               setIsResumedSession(true);
               console.log('✅ セッション状態設定完了 (currentSessionId:', parsed.sessionId, ', isResumedSession: true)');
+              
+              // 参加者データを解析
+              let participantsData;
+              let aiData: AICharacter[] = [];
+              let userParticipates = false;
+              
+              try {
+                // 新しい形式（完全なAI情報付き）でパース
+                participantsData = JSON.parse(sessionData.participants);
+                if (participantsData.aiData && Array.isArray(participantsData.aiData)) {
+                  aiData = participantsData.aiData;
+                  userParticipates = participantsData.userParticipates || false;
+                  console.log('📋 新形式の参加者データ復元:', { aiData, userParticipates });
+                } else {
+                  throw new Error('新形式ではない');
+                }
+              } catch {
+                // 旧形式（名前のみ）の場合
+                const participantNames = JSON.parse(sessionData.participants);
+                userParticipates = participantNames.includes('ユーザー');
+                aiData = participantNames
+                  .filter((p: string) => p !== 'ユーザー')
+                  .map((name: string) => ({
+                    name,
+                    role: '復元されたAI', // 旧データの場合はデフォルト値
+                    description: 'セッション復元時に作成されました'
+                  }));
+                console.log('⚠️ 旧形式の参加者データ復元:', { aiData, userParticipates });
+              }
+              
               setConfig({
                 discussionTopic: sessionData.topic,
-                aiData: JSON.parse(sessionData.participants).filter((p: string) => p !== 'ユーザー').map((name: string) => ({
-                  name,
-                  role: '', // 復元時は簡略化
-                  description: ''
-                })),
-                participate: JSON.parse(sessionData.participants).includes('ユーザー')
+                aiData,
+                participate: userParticipates
               });
               
               // メッセージを復元（データベースの最新データを使用）
@@ -175,6 +208,46 @@ const PlayPage: React.FC = () => {
               }));
               setMessages(messagesWithDateTimestamp);
               setDiscussionStarted(true);
+              
+              // ターン状態を復元：最後の発言者に基づいて次のターンを決定
+              if (messagesWithDateTimestamp.length > 0) {
+                const lastMessage = messagesWithDateTimestamp[messagesWithDateTimestamp.length - 1];
+                const lastSpeaker = lastMessage.speaker;
+                
+                if (lastSpeaker === 'ユーザー') {
+                  // 最後がユーザーの発言なら、次はAIのターン（待機状態）
+                  setCurrentTurn(1);
+                  setIsWaitingForResume(true); // AIターンの場合は待機状態に設定
+                  console.log('🔄 ターン復元: ユーザーの後 → AI(1)のターン（待機中）');
+                } else {
+                  // 最後がAIの発言なら、次のAIまたはユーザーのターンを決定
+                  const aiNames = aiData.map(ai => ai.name);
+                  const lastAIIndex = aiNames.indexOf(lastSpeaker);
+                  
+                  if (lastAIIndex >= 0 && lastAIIndex < aiNames.length - 1) {
+                    // 次のAIのターン（待機状態）
+                    setCurrentTurn(lastAIIndex + 2);
+                    setIsWaitingForResume(true);
+                    console.log(`🔄 ターン復元: ${lastSpeaker}の後 → ${aiNames[lastAIIndex + 1]}(${lastAIIndex + 2})のターン（待機中）`);
+                  } else {
+                    // 全AIが発言済みなら、ユーザーのターン（参加している場合）または最初のAIのターン
+                    const nextTurn = userParticipates ? 0 : 1;
+                    setCurrentTurn(nextTurn);
+                    if (nextTurn > 0) {
+                      setIsWaitingForResume(true); // AIターンの場合は待機状態
+                    }
+                    console.log('🔄 ターン復元: 全AI発言済み → ', userParticipates ? 'ユーザー(0)' : 'AI(1)', 'のターン', nextTurn > 0 ? '（待機中）' : '');
+                  }
+                }
+              } else {
+                // メッセージがない場合は開始状態
+                const initialTurn = userParticipates ? 0 : 1;
+                setCurrentTurn(initialTurn);
+                if (initialTurn > 0) {
+                  setIsWaitingForResume(true); // AIターンの場合は待機状態
+                }
+                console.log('🔄 ターン復元: メッセージなし → ', userParticipates ? 'ユーザー(0)' : 'AI(1)', 'のターン', initialTurn > 0 ? '（待機中）' : '');
+              }
               
               console.log('✅ セッション復元完了:', messagesWithDateTimestamp.length, 'メッセージ');
             } catch (error) {
@@ -222,63 +295,93 @@ const PlayPage: React.FC = () => {
       // ユーザーが参加しない場合、AIだけで議論開始
       setCurrentTurn(1);
       setDiscussionStarted(true);
+      setIsWaitingForResume(false); // 新規開始時は待機状態をリセット
       processAITurn();
     } else {
       setDiscussionStarted(true);
+      setIsWaitingForResume(false); // 新規開始時は待機状態をリセット
+    }
+  };
+
+  // AIの応答を再開する関数
+  const resumeAIResponse = async () => {
+    console.log('🔄 AI応答再開:', { currentTurn, isWaitingForResume });
+    setIsWaitingForResume(false);
+    try {
+      await processAITurn();
+    } catch (error) {
+      console.error('❌ AI応答再開エラー:', error);
+      showAIResponseError('AI参加者', `${error}`);
     }
   };
 
   const handleUserSubmit = async () => {
-    if (!userInput.trim() || isProcessing) {
-      console.log('🚫 ユーザー発言スキップ:', { userInput: userInput.trim(), isProcessing });
+    const trimmedInput = userInput.trim();
+    
+    // 入力検証
+    if (!trimmedInput || isProcessing) {
+      console.log('🚫 ユーザー発言スキップ:', { hasInput: !!trimmedInput, isProcessing });
+      return;
+    }
+    
+    // 長さ制限チェック（10,000文字まで）
+    if (trimmedInput.length > 10000) {
+      alert('⚠️ メッセージが長すぎます。10,000文字以内で入力してください。');
       return;
     }
 
-    console.log('📝 ユーザー発言開始:', userInput.trim());
-
-    const userMessage: DiscussionMessage = {
-      speaker: 'ユーザー',
-      message: userInput,
-      isUser: true,
-      timestamp: new Date()
-    };
-
-    const updatedMessages = [...messages, userMessage];
-    setMessages(updatedMessages);
-    setRecentMessages(prev => [...prev, userMessage]);
-    setUserInput('');
-    setCurrentTurn(1); // 次はAIのターン
-    setTotalTurns(prev => prev + 1);
-    
-    console.log('👤 ユーザー発言処理完了、自動保存実行前:', {
-      messageCount: updatedMessages.length,
-      currentSessionId,
-      isResumedSession
-    });
-    
-    // ユーザー発言後に自動保存（更新されたメッセージ配列を渡す）
-    await autoSaveSession(updatedMessages);
-    
-    // 議論フェーズの自動調整（ユーザー発言時も）
-    if (totalTurns > 8 && discussionPhase === 'exploration') {
-      setDiscussionPhase('deepening');
-    } else if (totalTurns > 16 && discussionPhase === 'deepening') {
-      setDiscussionPhase('synthesis');
-    }
-
-    // 定期的な議論分析（ユーザー発言後も）
-    setTimeout(() => {
-      checkAndAnalyze();
-    }, 1000);
-    
-    console.log('🤖 AI応答開始...');
-    // AI応答を順番に処理
     try {
-      await processAITurn();
-      console.log('✅ AI応答完了');
+      console.log(`📝 ユーザー発言開始（文字数: ${trimmedInput.length}）`);
+
+      const userMessage: DiscussionMessage = {
+        speaker: 'ユーザー',
+        message: trimmedInput,
+        isUser: true,
+        timestamp: new Date()
+      };
+
+      const updatedMessages = [...messages, userMessage];
+      setMessages(updatedMessages);
+      setRecentMessages(prev => [...prev, userMessage]);
+      setUserInput('');
+      setCurrentTurn(1); // 次はAIのターン
+      setTotalTurns(prev => prev + 1);
+      
+      console.log('👤 ユーザー発言処理完了、自動保存実行前:', {
+        messageCount: updatedMessages.length,
+        currentSessionId,
+        isResumedSession
+      });
+      
+      // ユーザー発言後に自動保存（更新されたメッセージ配列を渡す）
+      await autoSaveSession(updatedMessages);
+      
+      // 議論フェーズの自動調整（ユーザー発言時も）
+      if (totalTurns > 8 && discussionPhase === 'exploration') {
+        setDiscussionPhase('deepening');
+      } else if (totalTurns > 16 && discussionPhase === 'deepening') {
+        setDiscussionPhase('synthesis');
+      }
+
+      // 定期的な議論分析（ユーザー発言後も）
+      setTimeout(() => {
+        checkAndAnalyze();
+      }, 1000);
+      
+      console.log('🤖 AI応答開始...');
+      // AI応答を順番に処理
+      try {
+        setIsWaitingForResume(false); // AI応答開始時に待機状態をリセット
+        await processAITurn();
+        console.log('✅ AI応答完了');
+      } catch (error) {
+        console.error('❌ AI応答エラー:', error);
+        showAIResponseError('AI参加者', `${error}`);
+      }
     } catch (error) {
-      console.error('❌ AI応答エラー:', error);
-      showAIResponseError('AI参加者', `${error}`);
+      console.error('❌ ユーザー発言処理エラー:', error);
+      alert('メッセージの送信中にエラーが発生しました。もう一度お試しください。');
+      // エラー時は入力をクリアしない
     }
   };
 
@@ -611,34 +714,35 @@ const PlayPage: React.FC = () => {
     }
 
     try {
-      const participants = [
-        ...(config.participate ? ['ユーザー'] : []),
-        ...config.aiData.map(ai => ai.name)
-      ];
+      // 参加者情報を完全な形で保存（名前、役職、説明を含む）
+      const participantsData = {
+        userParticipates: config.participate,
+        aiData: config.aiData // AI情報全体を保存
+      };
       
       console.log('📦 保存データ準備完了:', {
-        participants: participants,
+        participantsData: participantsData,
         topic: config.discussionTopic,
         messageCount: currentMessages.length,
         messagesPreview: currentMessages.slice(-2).map(m => ({ speaker: m.speaker, message: m.message.substring(0, 50) + '...' }))
       });
 
-      if (currentSessionId && isResumedSession) {
+      if (currentSessionId) {
         // 既存セッションの更新
         console.log('🔄 既存セッション更新中:', currentSessionId);
-        await invoke('update_discussion_session', {
-          sessionId: currentSessionId,
-          messages: JSON.stringify(currentMessages)
-        });
+        await updateSession(
+          currentSessionId,
+          JSON.stringify(currentMessages)
+        );
         console.log('✅ セッション更新完了（自動保存）');
       } else {
         // 新規セッションとして保存
         console.log('📝 新規セッション作成中... (currentSessionId:', currentSessionId, ', isResumedSession:', isResumedSession, ')');
-        const sessionId = await invoke<number>('save_discussion_session', {
-          topic: config.discussionTopic,
-          participants: JSON.stringify(participants),
-          messages: JSON.stringify(currentMessages)
-        });
+        const sessionId = await saveSession(
+          config.discussionTopic,
+          JSON.stringify(participantsData), // 完全な参加者データを保存
+          JSON.stringify(currentMessages)
+        );
         setCurrentSessionId(sessionId);
         setIsResumedSession(true);
         console.log('✅ 新規セッション作成完了（自動保存）:', sessionId);
@@ -759,7 +863,7 @@ const PlayPage: React.FC = () => {
       )}
 
       {/* 議論分析ボタン */}
-      <HStack width="100%" justify="center" gap={3}>
+      <HStack width="100%" justify="flex-end" gap={3}>
         <Button 
           size={{ base: "sm", md: "md" }}
           colorPalette="green" 
@@ -823,34 +927,11 @@ const PlayPage: React.FC = () => {
             mb={{ base: 4, md: 0 }} // メッセージエリアに下部マージン追加
           >
             {messages.map((msg, index) => (
-              <Box 
-                key={index} 
-                mb={{ base: 2, md: 3 }}
-                display="flex"
-                justifyContent={msg.isUser ? "flex-end" : "flex-start"}
-                alignItems="flex-start"
-              >
-                <Box
-                  maxWidth={{ base: "85%", md: "75%" }}
-                  bg={msg.isUser ? "green.solid" : "bg.muted"}
-                  color={msg.isUser ? "green.contrast" : "fg"}
-                  p={{ base: 2, md: 3 }}
-                  borderRadius="18px"
-                  borderBottomRightRadius={msg.isUser ? "4px" : "18px"}
-                  borderBottomLeftRadius={msg.isUser ? "18px" : "4px"}
-                  boxShadow="sm"
-                  border="none"
-                  position="relative"
-                >
-                  <Text fontSize="xs" fontWeight="bold" mb={1} opacity={0.7}>
-                    {msg.isUser ? 'あなた' : msg.speaker}
-                  </Text>
-                  <Text fontSize={{ base: "xs", md: "sm" }} lineHeight="1.4">{msg.message}</Text>
-                  <Text fontSize="xs" opacity={0.5} mt={2} textAlign="right">
-                    {new Date(msg.timestamp).toLocaleTimeString()}
-                  </Text>
-                </Box>
-              </Box>
+              <ChatMessage 
+                key={index}
+                message={msg}
+                index={index}
+              />
             ))}
             
             {isProcessing && (
@@ -879,8 +960,11 @@ const PlayPage: React.FC = () => {
                     scrollToBottom();
                   }}
                   boxShadow="md"
+                  opacity={0.7}
+                  _hover={{ opacity: 1 }}
+                  transition="opacity 0.2s"
                 >
-                  ↓ 最新メッセージへ
+                  ↓ 新しいメッセージを表示する
                 </Button>
               </Box>
             )}
@@ -1276,6 +1360,7 @@ const PlayPage: React.FC = () => {
         bg="bg" 
         p={{ base: 3, md: 4 }}
         width="100%"
+        minWidth="100%"
       >
         {/* ユーザー入力エリア */}
         {config.participate && (
@@ -1303,44 +1388,90 @@ const PlayPage: React.FC = () => {
               </Text>
             )}
             
-            <Textarea
-              value={userInput}
-              onChange={(e) => setUserInput(e.target.value)}
-              placeholder={
-                !discussionStarted ? "議論開始後に入力できます" :
-                currentTurn === 0 && !isProcessing ?
-                  (discussionPhase === 'exploration' ? "「なぜ〜なのでしょうか？」「もし〜だったら？」など..." :
-                   discussionPhase === 'deepening' ? "「具体的には〜」「例えば〜」「実際には〜」など..." :
-                   "「解決策として〜」「結論的には〜」「今後は〜」など...") :
-                "他の参加者のターンです"
-              }
-              resize="none"
-              rows={3}
-              fontSize={{ base: "sm", md: "md" }}
-              disabled={!discussionStarted || currentTurn !== 0 || isProcessing}
-            />
+            <VStack align="stretch" gap={2} width="100%" flex="1">
+              <Textarea
+                value={userInput}
+                onChange={(e) => setUserInput(e.target.value)}
+                placeholder={
+                  !discussionStarted ? "議論開始後に入力できます" :
+                  currentTurn === 0 && !isProcessing ?
+                    (discussionPhase === 'exploration' ? "「なぜ〜なのでしょうか？」「もし〜だったら？」など..." :
+                     discussionPhase === 'deepening' ? "「具体的には〜」「例えば〜」「実際には〜」など..." :
+                     "「解決策として〜」「結論的には〜」「今後は〜」など...") :
+                  "他の参加者のターンです"
+                }
+                resize="none"
+                rows={3}
+                fontSize={{ base: "sm", md: "md" }}
+                disabled={!discussionStarted || currentTurn !== 0 || isProcessing}
+                maxLength={10000}
+                width="100%"
+                minWidth="100%"
+              />
+              
+              {/* 文字数カウンター */}
+              <HStack justify="space-between">
+                <Text fontSize="xs" color="gray.500">
+                  {userInput.length}/10,000文字
+                </Text>
+                {userInput.length > 9000 && (
+                  <Text fontSize="xs" color="orange.500">
+                    残り{10000 - userInput.length}文字
+                  </Text>
+                )}
+              </HStack>
+            </VStack>
             
             <HStack width="100%" gap={2}>
               {!discussionStarted ? (
-                <Button 
-                  colorPalette="green" 
-                  onClick={startDiscussion}
-                  disabled={!isModelLoaded || isProcessing}
-                  flex="1"
-                  size={{ base: "sm", md: "md" }}
-                >
-                  {!isModelLoaded ? 'Ollamaが起動していません' : 
-                   isProcessing ? '処理中...' : '議論を開始する'}
-                </Button>
+                <>
+                  <Button 
+                    colorPalette="green" 
+                    onClick={startDiscussion}
+                    disabled={!isModelLoaded || isProcessing}
+                    flex="1"
+                    size={{ base: "sm", md: "md" }}
+                  >
+                    {!isModelLoaded ? 'Ollamaが起動していません' : 
+                     isProcessing ? '処理中...' : '議論を開始する'}
+                  </Button>
+                  {/* テスト用ボタン */}
+                  <Button 
+                    colorPalette="blue" 
+                    onClick={async () => {
+                      console.log('🧪 テスト開始');
+                      try {
+                        const result = await testGenerateText();
+                        console.log('✅ テスト成功:', result);
+                        alert(`テスト成功: ${result}`);
+                      } catch (error) {
+                        console.error('❌ テスト失敗:', error);
+                        alert(`テスト失敗: ${error}`);
+                      }
+                    }}
+                    disabled={!isModelLoaded || isProcessing}
+                    variant="outline"
+                    size={{ base: "sm", md: "md" }}
+                  >
+                    🧪 AI接続テスト
+                  </Button>
+                </>
               ) : (
                 <Button 
                   colorPalette="green" 
-                  onClick={handleUserSubmit}
-                  disabled={!userInput.trim() || !isModelLoaded || currentTurn !== 0 || isProcessing}
+                  onClick={
+                    isWaitingForResume && currentTurn > 0 ? resumeAIResponse : 
+                    handleUserSubmit
+                  }
+                  disabled={
+                    isWaitingForResume && currentTurn > 0 ? false : // 復元時の再開ボタンは常に有効
+                    !userInput.trim() || !isModelLoaded || currentTurn !== 0 || isProcessing
+                  }
                   flex="1"
                   size={{ base: "sm", md: "md" }}
                 >
                   {!isModelLoaded ? 'Ollamaが起動していません' : 
+                   isWaitingForResume && currentTurn > 0 ? '応答を再開する' :
                    currentTurn !== 0 ? 'AIのターンです' :
                    isProcessing ? '処理中...' : '発言する'}
                 </Button>
@@ -1350,11 +1481,11 @@ const PlayPage: React.FC = () => {
               {discussionStarted && !config.participate && !isProcessing && (
                 <Button 
                   colorPalette="green" 
-                  onClick={processAITurn}
+                  onClick={isWaitingForResume ? resumeAIResponse : processAITurn}
                   size={{ base: "sm", md: "md" }}
                   variant="outline"
                 >
-                  次の発言を生成
+                  {isWaitingForResume ? '応答を再開する' : '次の発言を生成'}
                 </Button>
               )}
             </HStack>

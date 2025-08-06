@@ -2,14 +2,11 @@
 
 mod prompts;
 
-use tauri::command;
+use tauri::{command, AppHandle};
 use reqwest::Client;
 use serde_json::json;
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::PathBuf;
-use std::sync::Mutex;
-use std::collections::HashMap;
+use tauri_plugin_sql::{Migration, MigrationKind};
 use chrono;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -22,24 +19,22 @@ pub struct SavedSession {
     pub updated_at: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct NewSession {
-    pub topic: String,
-    pub participants: String,
-    pub messages: String,
-}
-
-// セッションストレージの管理
-#[derive(Debug, Serialize, Deserialize, Default)]
-struct SessionStorage {
-    sessions: HashMap<i64, SavedSession>,
-    next_id: i64,
-}
-
-// グローバル状態
-struct AppState {
-    storage: Mutex<SessionStorage>,
-    data_file: PathBuf,
+// ログ用のプロンプトマスキング関数
+fn mask_prompt_for_log(prompt: &str) -> String {
+    if prompt.len() <= 100 {
+        prompt.to_string()
+    } else {
+        // UTF-8文字境界を考慮して50文字分を取得
+        let mut boundary = 50;
+        while boundary > 0 && !prompt.is_char_boundary(boundary) {
+            boundary -= 1;
+        }
+        if boundary == 0 {
+            return "[プロンプトが表示できません]".to_string();
+        }
+        
+        format!("{}...[{}文字省略]", &prompt[..boundary], prompt.chars().count() - prompt[..boundary].chars().count())
+    }
 }
 
 // モデルロード状態チェック（とりあえずOllamaが起きてるか）
@@ -58,36 +53,59 @@ async fn is_model_loaded() -> bool {
     }
 }
 
+// テキスト生成のテスト用コマンド
+#[command]
+async fn test_generate_text() -> Result<String, String> {
+    println!("🧪 テスト用generate_text呼び出し開始");
+    
+    let test_prompt = "こんにちは。あなたの名前は何ですか？日本語で短く答えてください。".to_string();
+    println!("🔍 テストプロンプト: {}", test_prompt);
+    
+    generate_text(test_prompt).await
+}
+
 // テキスト生成
 #[command]
 async fn generate_text(prompt: String) -> Result<String, String> {
-    println!("🧠 generate_text 呼び出し: prompt = {}", prompt);
+    println!("🧠 generate_text 呼び出し: prompt = {}", mask_prompt_for_log(&prompt));
+    println!("🔍 プロンプト長: {}文字", prompt.len());
 
     let client = Client::new();
     let body = json!({
         "model": "gemma3:4b",
-        // "model": "yuiseki/sarashina2.2:1b", 
         "prompt": prompt,
         "stream": false
     });
 
+    println!("📡 Ollama API へリクエスト送信中...");
     let res = client
         .post("http://localhost:11434/api/generate")
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("❌ リクエスト失敗: {}", e))?;
+        .map_err(|e| {
+            let error_msg = format!("❌ リクエスト失敗: {}", e);
+            println!("{}", error_msg);
+            error_msg
+        })?;
 
+    println!("📥 レスポンス受信、ステータス: {}", res.status());
     let json: serde_json::Value = res
         .json()
         .await
-        .map_err(|e| format!("❌ JSONパース失敗: {}", e))?;
+        .map_err(|e| {
+            let error_msg = format!("❌ JSONパース失敗: {}", e);
+            println!("{}", error_msg);
+            error_msg
+        })?;
 
+    println!("🔍 Ollama応答JSON: {:?}", json);
     if let Some(resp) = json["response"].as_str() {
-        println!("📦 応答取得成功");
+        println!("📦 応答取得成功: {}文字", resp.len());
         Ok(resp.to_string())
     } else {
-        println!("⚠️ 応答フィールドなし: {:?}", json);
+        let error_msg = format!("⚠️ 応答フィールドなし: {:?}", json);
+        println!("{}", error_msg);
         Err("応答なし".into())
     }
 }
@@ -101,9 +119,10 @@ async fn generate_ai_response(
     conversation_history: String,
     discussion_topic: String,
 ) -> Result<String, String> {
-    println!("🤖 generate_ai_response 呼び出し: participant_name={}, role={}, description={}, conversation_history={}, discussion_topic={}", 
-        participant_name, role, description, conversation_history, discussion_topic);
+    println!("🤖 generate_ai_response 呼び出し: participant_name={}, role={}, description={}, conversation_history=[{}文字], discussion_topic={}", 
+        participant_name, role, description, conversation_history.len(), discussion_topic);
     
+    println!("🔧 プロンプト生成開始...");
     let xml_prompt = prompts::build_ai_response_prompt(
         &participant_name,
         &role,
@@ -111,8 +130,13 @@ async fn generate_ai_response(
         &conversation_history,
         &discussion_topic,
     );
+    println!("✅ プロンプト生成完了: {}文字", xml_prompt.len());
 
-    generate_text(xml_prompt).await
+    println!("🚀 generate_text呼び出し開始...");
+    let result = generate_text(xml_prompt).await;
+    println!("📋 generate_text結果: {:?}", 
+        result.as_ref().map(|s| format!("成功({}文字)", s.len())).unwrap_or_else(|e| format!("エラー: {}", e)));
+    result
 }
 
 // 議論開始のためのファシリテート
@@ -182,105 +206,12 @@ async fn summarize_discussion(
     generate_text(xml_prompt).await
 }
 
-// データベース関連のコマンド（本格ファイルベース実装）
+// データベース関連のコマンド（SQLite実装）
 
-// セッションストレージのヘルパー関数
-impl AppState {
-    fn load_storage(&self) -> SessionStorage {
-        if self.data_file.exists() {
-            match fs::read_to_string(&self.data_file) {
-                Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-                Err(_) => SessionStorage::default(),
-            }
-        } else {
-            SessionStorage::default()
-        }
-    }
-
-    fn save_storage(&self, storage: &SessionStorage) -> Result<(), String> {
-        let content = serde_json::to_string_pretty(storage)
-            .map_err(|e| format!("シリアライゼーションエラー: {}", e))?;
-        
-        if let Some(parent) = self.data_file.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("ディレクトリ作成エラー: {}", e))?;
-        }
-        
-        fs::write(&self.data_file, content)
-            .map_err(|e| format!("ファイル書き込みエラー: {}", e))?;
-        
-        Ok(())
-    }
-}
-
-// 議論セッションを保存または更新（スマート保存）
-#[command]
-async fn save_or_update_discussion_session(
-    state: tauri::State<'_, AppState>,
-    session_id: Option<i64>, // None = 新規, Some(id) = 更新
-    topic: String,
-    participants: String,
-    messages: String,
-) -> Result<i64, String> {
-    println!("💾 議論セッション保存/更新開始: {}", topic);
-    println!("📊 データ詳細 - セッションID: {:?}, 参加者: {}, メッセージ数: {}", session_id, participants, messages.len());
-    
-    let mut storage_lock = state.storage.lock().unwrap();
-    let mut storage = state.load_storage();
-    
-    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    
-    let final_session_id = match session_id {
-        // 既存セッションの更新
-        Some(id) => {
-            if let Some(existing_session) = storage.sessions.get_mut(&id) {
-                existing_session.topic = topic;
-                existing_session.participants = participants;
-                existing_session.messages = messages;
-                existing_session.updated_at = now;
-                println!("🔄 既存セッション更新: ID {}", id);
-                id
-            } else {
-                return Err(format!("更新対象のセッションが見つかりません: ID {}", id));
-            }
-        }
-        // 新規セッション作成
-        None => {
-            storage.next_id += 1;
-            let new_id = storage.next_id;
-            
-            let session = SavedSession {
-                id: new_id,
-                topic,
-                participants,
-                messages,
-                created_at: now.clone(),
-                updated_at: now,
-            };
-            
-            storage.sessions.insert(new_id, session);
-            println!("🆕 新規セッション作成: ID {}", new_id);
-            new_id
-        }
-    };
-    
-    match state.save_storage(&storage) {
-        Ok(_) => {
-            *storage_lock = storage;
-            println!("✅ セッション保存完了: ID {}", final_session_id);
-            Ok(final_session_id)
-        }
-        Err(e) => {
-            println!("❌ セッション保存失敗: {}", e);
-            Err(e)
-        }
-    }
-}
-
-// 議論セッションを保存（従来版・下位互換のため残す）
+// 議論セッションを保存
 #[command]
 async fn save_discussion_session(
-    state: tauri::State<'_, AppState>,
+    _app: AppHandle,
     topic: String,
     participants: String,
     messages: String,
@@ -288,179 +219,123 @@ async fn save_discussion_session(
     println!("💾 議論セッション保存開始: {}", topic);
     println!("📊 保存データ詳細 - 参加者: {}, メッセージ数: {}", participants, messages.len());
     
-    let mut storage_lock = state.storage.lock().unwrap();
-    let mut storage = state.load_storage();
-    
-    storage.next_id += 1;
-    let session_id = storage.next_id;
-    
-    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    
-    let session = SavedSession {
-        id: session_id,
-        topic,
-        participants,
-        messages,
-        created_at: now.clone(),
-        updated_at: now,
-    };
-    
-    storage.sessions.insert(session_id, session);
-    
-    match state.save_storage(&storage) {
-        Ok(_) => {
-            *storage_lock = storage;
-            println!("✅ セッション保存完了: ID {}", session_id);
-            Ok(session_id)
-        }
-        Err(e) => {
-            println!("❌ セッション保存失敗: {}", e);
-            Err(e)
-        }
-    }
-}
-
-// 同じトピック・参加者の既存セッションを検索
-#[command]
-async fn find_existing_session(
-    state: tauri::State<'_, AppState>,
-    topic: String,
-    participants: String,
-) -> Result<Option<SavedSession>, String> {
-    println!("🔍 既存セッション検索: topic={}, participants={}", topic, participants);
-    
-    let storage = state.load_storage();
-    
-    // 同じトピックと参加者の組み合わせを探す
-    for session in storage.sessions.values() {
-        if session.topic == topic && session.participants == participants {
-            println!("✅ 既存セッション発見: ID {}", session.id);
-            return Ok(Some(session.clone()));
-        }
+    // 現在はフロントエンド側でSQL実行を行う設計のため、
+    // バックエンドではバリデーションのみ実行してモックIDを返す
+    if topic.trim().is_empty() {
+        return Err("議論トピックが空です".to_string());
     }
     
-    println!("❌ 既存セッションなし");
-    Ok(None)
+    let session_id = chrono::Utc::now().timestamp(); // タイムスタンプをIDとして使用
+    println!("✅ セッション保存完了: ID {}", session_id);
+    Ok(session_id)
 }
 
-// 保存された議論セッションの一覧を取得
+// 議論セッションを更新
 #[command]
-async fn get_saved_sessions(state: tauri::State<'_, AppState>) -> Result<Vec<SavedSession>, String> {
-    println!("📚 保存済みセッション一覧取得");
+async fn update_discussion_session(
+    _app: AppHandle,
+    session_id: i64,
+    _messages: String,
+) -> Result<(), String> {
+    println!("🔄 議論セッション更新開始: ID {}", session_id);
     
-    let storage = state.load_storage();
-    let mut sessions: Vec<SavedSession> = storage.sessions.values().cloned().collect();
+    // フロントエンド側でSQL実行を行う設計のため、
+    // バックエンドでは成功レスポンスを返す
+    println!("✅ セッション更新完了: ID {}", session_id);
+    Ok(())
+}
+
+// 全セッション一覧を取得
+#[command]
+async fn get_all_sessions(_app: AppHandle) -> Result<Vec<SavedSession>, String> {
+    println!("📋 全セッション取得開始");
     
-    // 更新日時でソート（新しい順）
-    sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-    
-    println!("✅ セッション一覧取得完了: {}件", sessions.len());
+    // フロントエンド側でSQL実行を行う設計のため、
+    // バックエンドでは空のリストを返す（フロントエンドで実際のデータを取得）
+    let sessions: Vec<SavedSession> = vec![];
+    println!("✅ セッション取得完了: {}件（フロントエンド側で実際のデータを取得）", sessions.len());
     Ok(sessions)
 }
 
-// 特定のセッションを取得
+// 特定セッションを取得
 #[command]
-async fn get_session_by_id(state: tauri::State<'_, AppState>, session_id: i64) -> Result<SavedSession, String> {
-    println!("📖 セッション取得: ID {}", session_id);
-    
-    let storage = state.load_storage();
-    
-    if let Some(session) = storage.sessions.get(&session_id) {
-        println!("✅ セッション取得完了: {}", session.topic);
-        Ok(session.clone())
-    } else {
-        Err(format!("セッションが見つかりません: ID {}", session_id))
-    }
-}
-
-// セッションを更新（会話を継続した場合）
-#[command]
-async fn update_discussion_session(
-    state: tauri::State<'_, AppState>,
+async fn get_session_by_id(
+    _app: AppHandle,
     session_id: i64,
-    messages: String,
-) -> Result<(), String> {
-    println!("📝 セッション更新開始: ID {}", session_id);
-    println!("📊 更新データ詳細 - メッセージ数: {}", messages.len());
+) -> Result<Option<SavedSession>, String> {
+    println!("📖 セッション取得開始: ID {}", session_id);
     
-    let mut storage_lock = state.storage.lock().unwrap();
-    let mut storage = state.load_storage();
-    
-    if let Some(session) = storage.sessions.get_mut(&session_id) {
-        session.messages = messages;
-        session.updated_at = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
-        
-        match state.save_storage(&storage) {
-            Ok(_) => {
-                *storage_lock = storage;
-                println!("✅ セッション更新完了: ID {}", session_id);
-                Ok(())
-            }
-            Err(e) => {
-                println!("❌ セッション更新失敗: {}", e);
-                Err(e)
-            }
-        }
-    } else {
-        let error_msg = format!("更新するセッションが見つかりません: ID {}", session_id);
-        println!("❌ {}", error_msg);
-        Err(error_msg)
-    }
+    // フロントエンド側でSQL実行を行う設計のため、
+    // バックエンドではNoneを返す（フロントエンドで実際のデータを取得）
+    println!("⚠️ セッションが見つかりません: ID {}（フロントエンド側で実際のデータを取得）", session_id);
+    Ok(None)
 }
 
 // セッションを削除
 #[command]
-async fn delete_session(state: tauri::State<'_, AppState>, session_id: i64) -> Result<(), String> {
-    println!("🗑️ セッション削除: ID {}", session_id);
+async fn delete_session(
+    _app: AppHandle,
+    session_id: i64,
+) -> Result<(), String> {
+    println!("🗑️ セッション削除開始: ID {}", session_id);
     
-    let mut storage_lock = state.storage.lock().unwrap();
-    let mut storage = state.load_storage();
-    
-    if storage.sessions.remove(&session_id).is_some() {
-        state.save_storage(&storage)?;
-        *storage_lock = storage;
-        
-        println!("✅ セッション削除完了: ID {}", session_id);
-        Ok(())
-    } else {
-        Err(format!("削除するセッションが見つかりません: ID {}", session_id))
-    }
+    // フロントエンド側でSQL実行を行う設計のため、
+    // バックエンドでは成功レスポンスを返す
+    println!("✅ セッション削除完了: ID {}", session_id);
+    Ok(())
 }
 
 fn main() {
-    println!("🚀 Tauri バックエンド起動");
+    println!("🚀 Tauri バックエンド起動（SQLite版）");
 
-    // データディレクトリのパスを設定
-    let data_dir = std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("data");
-    
-    let data_file = data_dir.join("sessions.json");
-    
-    // アプリケーション状態を初期化
-    let app_state = AppState {
-        storage: Mutex::new(SessionStorage::default()),
-        data_file,
-    };
+    // データベースマイグレーション設定
+    let migrations = vec![
+        Migration {
+            version: 1,
+            description: "create_discussion_sessions_table",
+            sql: "CREATE TABLE IF NOT EXISTS discussion_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                topic TEXT NOT NULL,
+                participants TEXT NOT NULL,
+                messages TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );",
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 2,
+            description: "update_participants_schema_comment",
+            sql: "-- Schema update: participants field now stores JSON with {userParticipates: boolean, aiData: [{name, role, description}]}
+                  -- This is a no-op migration to document the schema change
+                  SELECT 1;",
+            kind: MigrationKind::Up,
+        }
+    ];
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_sql::Builder::default().build())
-        .manage(app_state)
+        .plugin(
+            tauri_plugin_sql::Builder::default()
+                .add_migrations("sqlite:data.db", migrations)
+                .build(),
+        )
         .invoke_handler(tauri::generate_handler![
+            // テスト用コマンド
+            test_generate_text,
+            // AI関連コマンド
             is_model_loaded,
             generate_text,
             generate_ai_response,
             start_discussion,
-            summarize_discussion,
             analyze_discussion_points,
             analyze_recent_discussion,
+            summarize_discussion,
+            // データベース関連コマンド
             save_discussion_session,
-            save_or_update_discussion_session,
-            find_existing_session,
-            get_saved_sessions,
-            get_session_by_id,
             update_discussion_session,
+            get_all_sessions,
+            get_session_by_id,
             delete_session
         ])
         .run(tauri::generate_context!())

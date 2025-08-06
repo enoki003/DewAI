@@ -1,21 +1,13 @@
 import { Box, VStack, HStack, Text, Button, CardRoot, CardBody, Spinner, Heading } from '@chakra-ui/react';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { invoke } from '@tauri-apps/api/core';
 import { 
   showSessionDeleteSuccess, 
   showSessionDeleteError,
   showGenericError 
 } from '../components/ui/notifications';
-
-interface SavedSession {
-  id: number;
-  topic: string;
-  participants: string;
-  messages: string;
-  created_at: string;
-  updated_at: string;
-}
+import { ConfirmDialog } from '../components/ui/confirm-dialog';
+import { getAllSessions, deleteSession as deleteDatabaseSession, SavedSession } from '../utils/database';
 
 interface Message {
   speaker: string;
@@ -36,7 +28,7 @@ export default function SessionsPage() {
   const loadSessions = async () => {
     try {
       setLoading(true);
-      const savedSessions = await invoke<SavedSession[]>('get_saved_sessions');
+      const savedSessions = await getAllSessions();
       setSessions(savedSessions);
     } catch (error) {
       console.error('セッション取得エラー:', error);
@@ -71,10 +63,8 @@ export default function SessionsPage() {
   };
 
   const deleteSession = async (sessionId: number, sessionTopic: string) => {
-    if (!confirm('このセッションを削除しますか？')) return;
-    
     try {
-      await invoke('delete_session', { sessionId });
+      await deleteDatabaseSession(sessionId);
       showSessionDeleteSuccess(sessionTopic);
       loadSessions(); // リストを再読み込み
     } catch (error) {
@@ -94,6 +84,29 @@ export default function SessionsPage() {
       return Array.isArray(messages) ? messages.length : 0;
     } catch {
       return 0;
+    }
+  };
+
+  const getParticipantInfo = (participantsStr: string) => {
+    try {
+      const participantsData = JSON.parse(participantsStr);
+      
+      // 新形式（完全なAI情報付き）の場合
+      if (participantsData.aiData && Array.isArray(participantsData.aiData)) {
+        const aiNames = participantsData.aiData.map((ai: any) => ai.name);
+        const userParticipates = participantsData.userParticipates || false;
+        const participants = userParticipates ? ['あなた', ...aiNames] : aiNames;
+        return participants.join(', ');
+      }
+      
+      // 旧形式（名前のみ）の場合
+      if (Array.isArray(participantsData)) {
+        return participantsData.map(p => p === 'ユーザー' ? 'あなた' : p).join(', ');
+      }
+      
+      return '不明な参加者';
+    } catch {
+      return '参加者情報の解析に失敗';
     }
   };
 
@@ -150,6 +163,9 @@ export default function SessionsPage() {
                           <Text>{getMessageCount(session.messages)}メッセージ</Text>
                           <Text>{formatDate(session.updated_at)}</Text>
                         </HStack>
+                        <Text color="gray.600" fontSize="sm">
+                          参加者: {getParticipantInfo(session.participants)}
+                        </Text>
                       </VStack>
                       <HStack gap={2}>
                         <Button 
@@ -160,14 +176,23 @@ export default function SessionsPage() {
                         >
                           続きから
                         </Button>
-                        <Button 
-                          size="sm" 
-                          colorPalette="red" 
-                          variant="outline"
-                          onClick={() => deleteSession(session.id, session.topic)}
-                        >
-                          削除
-                        </Button>
+                        <ConfirmDialog
+                          trigger={
+                            <Button 
+                              size="sm" 
+                              colorPalette="red" 
+                              variant="outline"
+                            >
+                              削除
+                            </Button>
+                          }
+                          title="セッションの削除"
+                          message={`「${session.topic}」を削除しますか？この操作は取り消せません。`}
+                          confirmText="削除"
+                          cancelText="キャンセル"
+                          variant="destructive"
+                          onConfirm={() => deleteSession(session.id, session.topic)}
+                        />
                       </HStack>
                     </HStack>
                   </VStack>

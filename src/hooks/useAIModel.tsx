@@ -45,6 +45,18 @@ export function useAIModel() {
     }
   }
 
+  // テスト用のシンプルなAIテキスト生成
+  async function testGenerateText(): Promise<string> {
+    try {
+      const res = await invoke<string>('test_generate_text');
+      console.log('✅ テスト成功:', res);
+      return res;
+    } catch (err) {
+      console.error('❌ テストエラー:', err);
+      throw err;
+    }
+  }
+
   async function generateAIResponse(
     name: string,
     role: string,
@@ -138,6 +150,7 @@ export function useAIModel() {
     isGenerating,
     error,
     generateText,
+    testGenerateText,
     generateAIResponse,
     startDiscussion,
     summarizeDiscussion,
