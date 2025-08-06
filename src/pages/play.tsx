@@ -736,7 +736,12 @@ const PlayPage: React.FC = () => {
         );
         console.log('✅ セッション更新完了（自動保存）');
       } else {
-        // 新規セッションとして保存
+        // 新規セッションとして保存（メッセージが1つ以上ある場合のみ）
+        if (currentMessages.length === 0) {
+          console.log('⏭️ メッセージが空のため、セッション作成をスキップ');
+          return;
+        }
+        
         console.log('📝 新規セッション作成中... (currentSessionId:', currentSessionId, ', isResumedSession:', isResumedSession, ')');
         const sessionId = await saveSession(
           config.discussionTopic,
