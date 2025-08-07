@@ -21,6 +21,7 @@ import {
   CheckboxRoot,
   CheckboxControl,
   CheckboxLabel,
+  CheckboxHiddenInput,
 } from "@chakra-ui/react";
 
 function Config() {
@@ -171,6 +172,7 @@ function Config() {
             checked={!participate}
             onCheckedChange={(details) => setParticipate(!details.checked)}
           >
+            <CheckboxHiddenInput />
             <CheckboxControl />
             <CheckboxLabel>私は参加しません</CheckboxLabel>
           </CheckboxRoot>
