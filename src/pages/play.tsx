@@ -76,7 +76,6 @@ const PlayPage: React.FC = () => {
   const [summarizedHistory, setSummarizedHistory] = useState<string>(''); // 要約された過去の議論
   const [recentMessages, setRecentMessages] = useState<DiscussionMessage[]>([]); // 直近3ターンの会話
   const [totalTurns, setTotalTurns] = useState(0); // 総ターン数
-  const [discussionPhase, setDiscussionPhase] = useState<'exploration' | 'deepening' | 'synthesis'>('exploration'); // 議論フェーズ
   const [currentTopics, setCurrentTopics] = useState<string[]>([]); // 現在の議論の争点
   
   // Debug: recentMessagesの状態をログ出力（TypeScript警告回避）
@@ -372,20 +371,12 @@ const PlayPage: React.FC = () => {
         isResumedSession
       });
       
-      // ユーザー発言後に自動保存（更新されたメッセージ配列を渡す）
-      await autoSaveSession(updatedMessages);
       
-      // 議論フェーズの自動調整（ユーザー発言時も）
-      if (totalTurns > 8 && discussionPhase === 'exploration') {
-        setDiscussionPhase('deepening');
-      } else if (totalTurns > 16 && discussionPhase === 'deepening') {
-        setDiscussionPhase('synthesis');
-      }
+      // 要約チェックを実行
+      await checkAndSummarize();
 
-      // 定期的な議論分析（ユーザー発言後も）
-      setTimeout(() => {
-        checkAndAnalyze();
-      }, 1000);
+      // 定期的な議論分析
+      await checkAndAnalyze();
       
       console.log('🤖 AI応答開始...');
       // AI応答を順番に処理
@@ -483,13 +474,6 @@ const PlayPage: React.FC = () => {
       // 定期的な議論分析
       await checkAndAnalyze();
 
-      // 議論フェーズの自動調整
-      if (totalTurns > 8 && discussionPhase === 'exploration') {
-        setDiscussionPhase('deepening');
-      } else if (totalTurns > 16 && discussionPhase === 'deepening') {
-        setDiscussionPhase('synthesis');
-      }
-
       // messagesの最新状態を参照する関数を作成
       const getCurrentMessages = () => {
         return new Promise<DiscussionMessage[]>((resolve) => {
@@ -514,16 +498,13 @@ const PlayPage: React.FC = () => {
             .map(msg => `${msg.speaker}: ${msg.message}`)
             .join('\n');
           
-          // フェーズ情報を含む会話履歴
-          const phaseInstruction = getPhaseInstruction(discussionPhase, totalTurns);
           const conversationHistory = summarizedHistory 
-            ? `${summarizedHistory}\n\n【直近の会話】\n${recentConversation}\n\n【議論フェーズ】\n${phaseInstruction}`
-            : `${recentConversation}\n\n【議論フェーズ】\n${phaseInstruction}`;
+            ? `${summarizedHistory}\n\n【直近の会話】\n${recentConversation}`
+            : recentConversation;
 
           console.log(`📤 ${ai.name}にリクエスト送信:`, {
             topic: config.discussionTopic,
-            historyLength: conversationHistory.length,
-            phase: discussionPhase
+            historyLength: conversationHistory.length
           });
 
           const response = await generateAIResponse(
@@ -588,20 +569,6 @@ const PlayPage: React.FC = () => {
     } finally {
       setIsProcessing(false);
       console.log('🏁 processAITurn完了');
-    }
-  };
-
-  // 議論フェーズに応じた指示を生成
-  const getPhaseInstruction = (phase: string, turns: number): string => {
-    switch (phase) {
-      case 'exploration':
-        return `現在は議論の探索フェーズです（${turns}ターン目）。多様な視点を出し合い、論点を整理してください。`;
-      case 'deepening':
-        return `現在は議論の深化フェーズです（${turns}ターン目）。具体例や根拠を示し、論点を深く掘り下げてください。`;
-      case 'synthesis':
-        return `現在は議論の統合フェーズです（${turns}ターン目）。これまでの議論を踏まえ、解決策や結論を模索してください。`;
-      default:
-        return `議論を深めるために、具体的な質問や事例を交えて発言してください。`;
     }
   };
 
@@ -865,14 +832,6 @@ const PlayPage: React.FC = () => {
         <HStack gap={1} wrap="wrap" justify={{ base: "start", lg: "end" }}>
           <Badge colorPalette="green" variant="outline" size={{ base: "sm", md: "md" }}>
             ターン: {totalTurns}
-          </Badge>
-          <Badge 
-            colorPalette="green"
-            variant="outline"
-            size={{ base: "sm", md: "md" }}
-          >
-            {discussionPhase === 'exploration' ? '探索' : 
-             discussionPhase === 'deepening' ? '深化' : '統合'}フェーズ
           </Badge>
           {summarizedHistory && (
             <Badge colorPalette="green" variant="outline" size={{ base: "sm", md: "md" }}>
@@ -1415,10 +1374,7 @@ const PlayPage: React.FC = () => {
                   </Text>
                 )}
                 <Text fontSize={{ base: "xs", md: "sm" }} color="fg.muted">
-                  💡 議論を深めるヒント: 
-                  {discussionPhase === 'exploration' ? '多様な視点や疑問を提示してみてください' :
-                   discussionPhase === 'deepening' ? '具体例や根拠を示して論点を深掘りしてください' :
-                   '解決策や結論に向けた提案をしてみてください'}
+                  💡 議論を深めるヒント: 多様な視点や疑問、具体例や根拠を示して論点を深掘りしてください
                 </Text>
               </>
             ) : (
@@ -1436,9 +1392,7 @@ const PlayPage: React.FC = () => {
                 placeholder={
                   !discussionStarted ? "議論開始後に入力できます" :
                   currentTurn === 0 && !isProcessing ?
-                    (discussionPhase === 'exploration' ? "「なぜ〜なのでしょうか？」「もし〜だったら？」など..." :
-                     discussionPhase === 'deepening' ? "「具体的には〜」「例えば〜」「実際には〜」など..." :
-                     "「解決策として〜」「結論的には〜」「今後は〜」など...") :
+                    "あなたの意見や質問を入力してください..." :
                   "他の参加者のターンです"
                 }
                 resize="none"
