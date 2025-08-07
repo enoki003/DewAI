@@ -16,7 +16,7 @@ function Home() {
         >
             <VStack gap={4} textAlign="center">
                 <Heading size="3xl">DewAIへようこそ</Heading>
-                <Text color="fg.muted">軽量で手軽な議論を開始しよう</Text>
+                <Text color="fg.muted">手軽な議論を開始しよう</Text>
             </VStack>
             
             <Button 

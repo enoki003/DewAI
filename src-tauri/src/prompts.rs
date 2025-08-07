@@ -269,7 +269,7 @@ pub fn optimize_conversation_for_analysis(conversation_history: &str, max_messag
     format!("{}[...以前の発言は省略...]", recent_messages)
 }
 
-/// 軽量な議論分析用プロンプト（最近の発言のみを対象）
+/// 議論分析用プロンプト（最近の発言のみを対象）
 pub fn build_lightweight_discussion_analysis_prompt(
     discussion_topic: &str,
     conversation_history: &str,

@@ -87,9 +87,9 @@ const PlayPage: React.FC = () => {
   // デバッグ用：分析結果が更新された時のログ
   useEffect(() => {
     if (discussionAnalysis) {
-      console.log('📊 議論分析結果更新:', discussionAnalysis);
-      console.log('📊 mainPoints:', discussionAnalysis.mainPoints);
-      console.log('📊 participantStances:', discussionAnalysis.participantStances);
+      console.log('議論分析結果更新:', discussionAnalysis);
+      console.log('mainPoints:', discussionAnalysis.mainPoints);
+      console.log('participantStances:', discussionAnalysis.participantStances);
     }
   }, [discussionAnalysis]);
   const [showAnalysis, setShowAnalysis] = useState(false);
@@ -150,20 +150,20 @@ const PlayPage: React.FC = () => {
           // データベースからセッション詳細を取得
           const loadSessionFromDatabase = async () => {
             try {
-              console.log('🔄 データベースからセッション復元中:', parsed.sessionId);
+              console.log('データベースからセッション復元中:', parsed.sessionId);
               const sessionData = await getSessionById(parsed.sessionId);
               
               if (!sessionData) {
                 throw new Error('セッションが見つかりません');
               }
               
-              console.log('📖 セッションデータ取得成功:', sessionData);
+              console.log('セッションデータ取得成功:', sessionData);
               
               // セッション設定を復元
-              console.log('🔧 セッション状態設定中... SessionID:', parsed.sessionId);
+              console.log('セッション状態設定中... SessionID:', parsed.sessionId);
               setCurrentSessionId(parsed.sessionId);
               setIsResumedSession(true);
-              console.log('✅ セッション状態設定完了 (currentSessionId:', parsed.sessionId, ', isResumedSession: true)');
+              console.log('セッション状態設定完了 (currentSessionId:', parsed.sessionId, ', isResumedSession: true)');
               
               // 参加者データを解析
               let participantsData;
@@ -176,7 +176,7 @@ const PlayPage: React.FC = () => {
                 if (participantsData.aiData && Array.isArray(participantsData.aiData)) {
                   aiData = participantsData.aiData;
                   userParticipates = participantsData.userParticipates || false;
-                  console.log('📋 新形式の参加者データ復元:', { aiData, userParticipates });
+                  console.log('新形式の参加者データ復元:', { aiData, userParticipates });
                 } else {
                   throw new Error('新形式ではない');
                 }
