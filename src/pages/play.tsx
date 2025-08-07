@@ -70,6 +70,7 @@ const PlayPage: React.FC = () => {
   const [isResumedSession, setIsResumedSession] = useState(false);
   const [previousPage, setPreviousPage] = useState<string>('/start'); // 戻り先管理
   const [isWaitingForResume, setIsWaitingForResume] = useState(false); // セッション復元時のAIターン待機状態
+  const [isSaving, setIsSaving] = useState(false); // セッション保存中フラグ
   
   // 要約システム用の新しい状態
   const [summarizedHistory, setSummarizedHistory] = useState<string>(''); // 要約された過去の議論
@@ -290,7 +291,20 @@ const PlayPage: React.FC = () => {
   ] : [];
 
   const startDiscussion = () => {
+    if (isSaving) {
+      console.log('💾 保存処理中のため、議論開始をスキップ');
+      return;
+    }
+    
     console.log('🎯 startDiscussion 呼び出し', { config, discussionStarted, isProcessing });
+    
+    // 新規議論開始時はセッション状態をクリア
+    if (!isResumedSession) {
+      console.log('🆕 新規議論開始: セッション状態をクリア');
+      setCurrentSessionId(null);
+      setIsResumedSession(false);
+    }
+    
     if (!config?.participate) {
       // ユーザーが参加しない場合、AIだけで議論開始
       setCurrentTurn(1);
@@ -305,6 +319,11 @@ const PlayPage: React.FC = () => {
 
   // AIの応答を再開する関数
   const resumeAIResponse = async () => {
+    if (isSaving) {
+      console.log('💾 保存処理中のため、AI応答再開をスキップ');
+      return;
+    }
+    
     console.log('🔄 AI応答再開:', { currentTurn, isWaitingForResume });
     setIsWaitingForResume(false);
     try {
@@ -319,7 +338,7 @@ const PlayPage: React.FC = () => {
     const trimmedInput = userInput.trim();
     
     // 入力検証
-    if (!trimmedInput || isProcessing) {
+    if (!trimmedInput || isProcessing || isSaving) {
       console.log('🚫 ユーザー発言スキップ:', { hasInput: !!trimmedInput, isProcessing });
       return;
     }
@@ -439,8 +458,12 @@ const PlayPage: React.FC = () => {
   };
 
   const processAITurn = async () => {
-    if (!config) {
-      console.log('🚫 processAITurn: configがありません');
+    if (!config || isProcessing || isSaving) {
+      console.log('🚫 processAITurn: 条件不足:', { 
+        hasConfig: !!config, 
+        isProcessing,
+        isSaving
+      });
       return;
     }
     
@@ -600,8 +623,12 @@ const PlayPage: React.FC = () => {
 
   // 議論分析を実行する関数
   const analyzeCurrentDiscussion = async () => {
-    if (!config || messages.length === 0) {
-      console.log('⚠️ 分析スキップ: config またはメッセージなし');
+    if (!config || messages.length === 0 || isSaving) {
+      console.log('⚠️ 分析スキップ:', { 
+        hasConfig: !!config,
+        messageCount: messages.length,
+        isSaving
+      });
       return;
     }
 
@@ -694,6 +721,12 @@ const PlayPage: React.FC = () => {
 
   // 自動セッション保存関数（サイレント）
   const autoSaveSession = async (messagesToSave?: DiscussionMessage[]) => {
+    // 既に保存中の場合はスキップ
+    if (isSaving) {
+      console.log('💾 保存処理中のため、重複保存をスキップ');
+      return;
+    }
+    
     const currentMessages = messagesToSave || messages;
     console.log('💾 自動セッション保存開始:', { 
       currentSessionId, 
@@ -713,6 +746,7 @@ const PlayPage: React.FC = () => {
       return;
     }
 
+    setIsSaving(true);
     try {
       // 参加者情報を完全な形で保存（名前、役職、説明を含む）
       const participantsData = {
@@ -755,6 +789,8 @@ const PlayPage: React.FC = () => {
     } catch (error) {
       console.error('自動保存エラー:', error);
       // サイレント処理のためアラートは出さない
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -1408,7 +1444,7 @@ const PlayPage: React.FC = () => {
                 resize="none"
                 rows={3}
                 fontSize={{ base: "sm", md: "md" }}
-                disabled={!discussionStarted || currentTurn !== 0 || isProcessing}
+                disabled={!discussionStarted || currentTurn !== 0 || isProcessing || isSaving}
                 maxLength={10000}
                 width="100%"
                 minWidth="100%"
@@ -1433,11 +1469,12 @@ const PlayPage: React.FC = () => {
                   <Button 
                     colorPalette="green" 
                     onClick={startDiscussion}
-                    disabled={!isModelLoaded || isProcessing}
+                    disabled={!isModelLoaded || isProcessing || isSaving}
                     flex="1"
                     size={{ base: "sm", md: "md" }}
                   >
                     {!isModelLoaded ? 'Ollamaが起動していません' : 
+                     isSaving ? '保存中...' :
                      isProcessing ? '処理中...' : '議論を開始する'}
                   </Button>
                   {/* テスト用ボタン */}
@@ -1454,7 +1491,7 @@ const PlayPage: React.FC = () => {
                         alert(`テスト失敗: ${error}`);
                       }
                     }}
-                    disabled={!isModelLoaded || isProcessing}
+                    disabled={!isModelLoaded || isProcessing || isSaving}
                     variant="outline"
                     size={{ base: "sm", md: "md" }}
                   >
@@ -1470,14 +1507,16 @@ const PlayPage: React.FC = () => {
                   }
                   disabled={
                     isWaitingForResume && currentTurn > 0 ? false : // 復元時の再開ボタンは常に有効
-                    !userInput.trim() || !isModelLoaded || currentTurn !== 0 || isProcessing
+                    !userInput.trim() || !isModelLoaded || currentTurn !== 0 || isProcessing || isSaving
                   }
                   flex="1"
                   size={{ base: "sm", md: "md" }}
                 >
                   {!isModelLoaded ? 'Ollamaが起動していません' : 
+                   isSaving ? '保存中...' :
                    isWaitingForResume && currentTurn > 0 ? '応答を再開する' :
                    currentTurn !== 0 ? 'AIのターンです' :
+                   isSaving ? '保存中...' :
                    isProcessing ? '処理中...' : '発言する'}
                 </Button>
               )}
@@ -1509,11 +1548,12 @@ const PlayPage: React.FC = () => {
             <Button 
               colorPalette="green" 
               onClick={discussionStarted ? processAITurn : startDiscussion}
-              disabled={isProcessing || !config}
+              disabled={isProcessing || !config || isSaving}
               size={{ base: "sm", md: "md" }}
               width="100%"
             >
               {!discussionStarted ? '議論開始' :
+               isSaving ? '保存中...' :
                isProcessing ? '処理中...' : '次の発言を生成'}
             </Button>
           </VStack>
