@@ -1,0 +1,32 @@
+# DewAI Docker開発環境
+version: '3.8'
+
+services:
+  dewai-dev:
+    build: .
+    container_name: dewai-development
+    volumes:
+      # ソースコードをバインドマウント（開発時の変更を反映）
+      - .:/app
+      # node_modulesはコンテナ内に保持
+      - /app/node_modules
+      # Cargoビルドキャッシュを保持
+      - cargo-cache:/root/.cargo
+    ports:
+      - "1420:1420"  # Vite開発サーバー
+    environment:
+      - NODE_ENV=development
+      - TAURI_DEV_HOST=0.0.0.0
+    working_dir: /app
+    # Tauri GUIアプリケーション用の設定（X11フォワーディング等）
+    environment:
+      - DISPLAY=:0
+    # 必要に応じてX11ソケットをマウント（Linux環境の場合）
+    # volumes:
+    #   - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    command: bash
+    tty: true
+    stdin_open: true
+
+volumes:
+  cargo-cache:

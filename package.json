@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:release": "npm run build && npm run tauri build",
+    "build:docker": "docker build -t dewai-dev .",
+    "dev:docker": "docker-compose up",
+    "dev:docker-build": "docker-compose up --build"
   },
   "dependencies": {
     "@chakra-ui/card": "^2.2.0",

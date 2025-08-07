@@ -1,0 +1,21 @@
+# Docker用の.dockerignore
+node_modules
+target
+dist
+.git
+.gitignore
+README.md
+.env*
+*.log
+coverage
+.nyc_output
+.vscode
+.idea
+
+# Tauri生成ファイル
+src-tauri/target
+src-tauri/Cargo.lock
+
+# OS生成ファイル
+.DS_Store
+Thumbs.db

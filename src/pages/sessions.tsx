@@ -8,6 +8,7 @@ import {
 } from '../components/ui/notifications';
 import { ConfirmDialog } from '../components/ui/confirm-dialog';
 import { getAllSessions, deleteSession as deleteDatabaseSession, SavedSession } from '../utils/database';
+import { useAIModel } from '../hooks/useAIModel';
 
 interface Message {
   speaker: string;
@@ -20,6 +21,7 @@ export default function SessionsPage() {
   const [sessions, setSessions] = useState<SavedSession[]>([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const { isModelLoaded } = useAIModel();
 
   useEffect(() => {
     loadSessions();
@@ -141,8 +143,9 @@ export default function SessionsPage() {
               colorPalette="green" 
               variant="solid"
               onClick={() => navigate('/config')}
+              disabled={!isModelLoaded}
             >
-              新しい議論を始める
+              {!isModelLoaded ? 'Ollama未接続' : '新しい議論を始める'}
             </Button>
           </VStack>
         ) : (
@@ -174,8 +177,9 @@ export default function SessionsPage() {
                           colorPalette="green"
                           variant="solid"
                           onClick={() => continueSession(session)}
+                          disabled={!isModelLoaded}
                         >
-                          続きから
+                          {!isModelLoaded ? 'Ollama未接続' : '続きから'}
                         </Button>
                         <ConfirmDialog
                           trigger={

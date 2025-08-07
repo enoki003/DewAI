@@ -97,7 +97,72 @@ npm run tauri build
 
 # プレビュー
 npm run preview
+
+# 配布用リリースビルド
+npm run build:release
+
+# Docker開発環境の構築
+npm run build:docker
+
+# Docker開発環境の起動
+npm run dev:docker
+
+# Docker開発環境の再ビルド＆起動
+npm run dev:docker-build
 ```
+
+## 配布用パッケージのビルド
+
+### Windows
+```batch
+# ビルドスクリプトを実行
+build-release.bat
+```
+
+### Linux/macOS
+```bash
+# ビルドスクリプトを実行
+chmod +x build-release.sh
+./build-release.sh
+```
+
+### 手動ビルド
+```bash
+# 依存関係のインストール
+npm install
+
+# フロントエンドビルド
+npm run build
+
+# Tauriパッケージ作成
+npm run tauri build
+```
+
+生成されたパッケージは `src-tauri/target/release/bundle/` に格納されます。
+
+## Docker開発環境
+
+### 前提条件
+- Docker
+- Docker Compose
+
+### 使用方法
+
+```bash
+# 開発環境コンテナを起動
+docker-compose up
+
+# コンテナ内でのコマンド実行
+docker exec -it dewai-development bash
+
+# コンテナ内でのアプリケーション起動
+npm run tauri dev
+```
+
+### 注意事項
+- GUIアプリケーションをDocker内で実行するには、X11フォワーディングなどの追加設定が必要な場合があります
+- モデルファイルは容量とライセンスの関係でコンテナには含まれていません
+- コンテナ内でOllamaとモデルを別途セットアップする必要があります
 
 ## 技術スタック
 
