@@ -2,7 +2,7 @@ import { Box, VStack, HStack, Text, Button, CardRoot, CardBody, Spinner, Heading
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  showSessionDeleteSuccess, 
+  showSessionDeleteSuccess,
   showSessionDeleteError,
   showGenericError 
 } from '../components/ui/notifications';
@@ -162,6 +162,7 @@ export default function SessionsPage() {
                         <HStack gap={4} color="gray.500" fontSize="sm">
                           <Text>{getMessageCount(session.messages)}メッセージ</Text>
                           <Text>{formatDate(session.updated_at)}</Text>
+                          <Text>📦 {session.model || 'モデル不明'}</Text>
                         </HStack>
                         <Text color="gray.600" fontSize="sm">
                           参加者: {getParticipantInfo(session.participants)}

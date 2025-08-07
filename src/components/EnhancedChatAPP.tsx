@@ -30,7 +30,7 @@ const EnhancedChatApp: React.FC = () => {
   const [inputText, setInputText] = useState('');
   const chatWindowRef = useRef<HTMLDivElement>(null);
 
-  const { isModelLoaded, error, generateText } = useAIModel();
+  const { isModelLoaded, generateText } = useAIModel();
   const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
@@ -80,12 +80,6 @@ const EnhancedChatApp: React.FC = () => {
       {!isModelLoaded && (
         <Box p={4} bg="blue.100" color="blue.800" borderRadius="md" mb={4}>
           モデルをロード中です。しばらくお待ちください...
-        </Box>
-      )}
-
-      {error && (
-        <Box p={4} bg="red.100" color="red.800" borderRadius="md" mb={4}>
-          エラーが発生しました: {error.message}
         </Box>
       )}
 

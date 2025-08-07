@@ -1,7 +1,7 @@
 import { Box, VStack, HStack, Text, Button, CardRoot, CardBody, Spinner, Heading, Badge } from '@chakra-ui/react';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { invoke } from '@tauri-apps/api/core';
+import { getAllSessions } from '../utils/database';
 
 interface DatabaseStats {
   total_sessions: number;
@@ -20,7 +20,22 @@ export default function DatabasePage() {
   const loadStats = async () => {
     try {
       setLoading(true);
-      const dbStats = await invoke<DatabaseStats>('get_database_stats');
+      // ローカルストレージから統計を計算
+      const sessions = await getAllSessions();
+      const now = new Date();
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(now.getDate() - 7);
+      
+      const recentSessions = sessions.filter(session => {
+        const sessionDate = new Date(session.updated_at);
+        return sessionDate >= sevenDaysAgo;
+      });
+      
+      const dbStats: DatabaseStats = {
+        total_sessions: sessions.length,
+        recent_sessions: recentSessions.length
+      };
+      
       setStats(dbStats);
     } catch (error) {
       console.error('統計取得エラー:', error);
@@ -79,7 +94,7 @@ export default function DatabasePage() {
                   
                   <Box pt={4} borderTop="1px solid" borderColor="border.muted">
                     <Text fontSize="sm" color="fg.muted">
-                      💡 データベースファイル: data.db
+                      💡 データストレージ: ローカルストレージ
                     </Text>
                   </Box>
                 </VStack>

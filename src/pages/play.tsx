@@ -56,7 +56,7 @@ interface DiscussionAnalysis {
 
 const PlayPage: React.FC = () => {
   const navigate = useNavigate();
-    const { generateAIResponse, summarizeDiscussion, analyzeDiscussionPoints, isModelLoaded, testGenerateText } = useAIModel();
+    const { generateAIResponse, summarizeDiscussion, analyzeDiscussionPoints, isModelLoaded, testGenerateText, selectedModel, changeModel, checkModelStatus } = useAIModel();
   
   const [config, setConfig] = useState<AIConfig | null>(null);
   const [messages, setMessages] = useState<DiscussionMessage[]>([]);
@@ -200,6 +200,12 @@ const PlayPage: React.FC = () => {
                 participate: userParticipates
               });
               
+              // セッションで使用していたモデルを復元
+              if (sessionData.model && sessionData.model !== selectedModel) {
+                console.log('セッション復元: モデル切り替え', selectedModel, '→', sessionData.model);
+                changeModel(sessionData.model);
+              }
+              
               // メッセージを復元（データベースの最新データを使用）
               const savedMessages = JSON.parse(sessionData.messages);
               const messagesWithDateTimestamp = savedMessages.map((msg: any) => ({
@@ -207,7 +213,17 @@ const PlayPage: React.FC = () => {
                 timestamp: new Date(msg.timestamp)
               }));
               setMessages(messagesWithDateTimestamp);
-              setDiscussionStarted(true);
+              
+              // Ollama接続チェック後に議論状態を復元
+              const modelStatus = await checkModelStatus();
+              if (!modelStatus) {
+                console.log('⚠️ セッション復元: Ollama接続なし、議論は一時停止状態');
+                alert('Ollamaに接続できません。議論を再開するにはOllamaが必要です。');
+                // 議論開始フラグは立てずに、メッセージのみ復元
+              } else {
+                setDiscussionStarted(true);
+                console.log('✅ セッション復元: Ollama接続あり、議論状態を復元');
+              }
               
               // ターン状態を復元：最後の発言者に基づいて次のターンを決定
               if (messagesWithDateTimestamp.length > 0) {
@@ -289,9 +305,16 @@ const PlayPage: React.FC = () => {
     ...config.aiData
   ] : [];
 
-  const startDiscussion = () => {
+  const startDiscussion = async () => {
     if (isSaving) {
       console.log('💾 保存処理中のため、議論開始をスキップ');
+      return;
+    }
+    
+    // Ollama接続チェック
+    if (!isModelLoaded) {
+      console.log('❌ Ollama接続なし、議論開始を中止');
+      alert('Ollamaに接続できません。Ollamaが起動していることを確認してください。');
       return;
     }
     
@@ -324,6 +347,14 @@ const PlayPage: React.FC = () => {
     }
     
     console.log('🔄 AI応答再開:', { currentTurn, isWaitingForResume });
+    
+    // Ollama接続チェック
+    if (!isModelLoaded) {
+      console.log('❌ Ollama接続なし、AI応答再開を中止');
+      alert('Ollamaに接続できません。Ollamaが起動していることを確認してください。');
+      return;
+    }
+    
     setIsWaitingForResume(false);
     try {
       await processAITurn();
@@ -747,7 +778,8 @@ const PlayPage: React.FC = () => {
         const sessionId = await saveSession(
           config.discussionTopic,
           JSON.stringify(participantsData), // 完全な参加者データを保存
-          JSON.stringify(currentMessages)
+          JSON.stringify(currentMessages),
+          selectedModel // 使用モデル名を保存
         );
         setCurrentSessionId(sessionId);
         setIsResumedSession(true);

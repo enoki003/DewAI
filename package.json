@@ -21,7 +21,7 @@
     "@emotion/styled": "^11.14.0",
     "@tauri-apps/api": "^2.5.0",
     "@tauri-apps/plugin-opener": "^2",
-    "@tauri-apps/plugin-sql": "^2.2.0",
+    "@tauri-apps/plugin-sql": "^2.3.0",
     "@types/dompurify": "^3.0.5",
     "dompurify": "^3.2.6",
     "framer-motion": "^12.7.4",

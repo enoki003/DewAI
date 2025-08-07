@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
 import { Spinner, VStack } from '@chakra-ui/react';
 
@@ -8,6 +8,7 @@ const Start = lazy(() => import('./pages/start'));
 const Config = lazy(() => import('./pages/config'));
 const Play = lazy(() => import('./pages/play'));
 const Sessions = lazy(() => import('./pages/sessions'));
+const Database = lazy(() => import('./pages/database'));
 
 // ローディングコンポーネント
 const LoadingSpinner = () => (
@@ -23,8 +24,10 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/start" element={<Start />} />
         <Route path="/sessions" element={<Sessions />} />
+        <Route path="/database" element={<Database />} />
         <Route path="/config" element={<Config />} />
         <Route path="/play" element={<Play />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>
   );

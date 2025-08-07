@@ -2,10 +2,10 @@
 
 mod prompts;
 
-use tauri::{command, AppHandle};
+use tauri::command;
 use reqwest::Client;
 use serde_json::json;
-use tauri_plugin_sql::{Migration, MigrationKind};
+// use tauri_plugin_sql::{Migration, MigrationKind};
 
 // ログ用のプロンプトマスキング関数
 fn mask_prompt_for_log(prompt: &str) -> String {
@@ -58,9 +58,13 @@ async fn generate_text(prompt: String) -> Result<String, String> {
     println!("generate_text 呼び出し: prompt = {}", mask_prompt_for_log(&prompt));
     println!("プロンプト長: {}文字", prompt.len());
 
+    // 設定からモデル名を取得（デフォルト: gemma3:4b）
+    let model_name = get_selected_model().await;
+    println!("使用モデル: {}", model_name);
+
     let client = Client::new();
     let body = json!({
-        "model": "gemma3:4b",
+        "model": model_name,
         "prompt": prompt,
         "stream": false
     });
@@ -88,6 +92,104 @@ async fn generate_text(prompt: String) -> Result<String, String> {
         })?;
 
     println!("Ollama応答JSON: {:?}", json);
+    if let Some(resp) = json["response"].as_str() {
+        println!("応答取得成功: {}文字", resp.len());
+        Ok(resp.to_string())
+    } else {
+        let error_msg = format!("応答フィールドなし: {:?}", json);
+        println!("{}", error_msg);
+        Err("応答なし".into())
+    }
+}
+
+// 現在選択されているモデルを取得
+async fn get_selected_model() -> String {
+    // とりあえずlocalStorageから読み取る機能はないので、デフォルトを返す
+    // フロントエンド側でモデル設定を管理
+    "gemma3:4b".to_string()
+}
+
+// 利用可能なモデル一覧を取得
+#[command]
+async fn get_available_models() -> Result<Vec<String>, String> {
+    println!("利用可能なモデル一覧を取得中...");
+    
+    let client = Client::new();
+    let res = client
+        .get("http://localhost:11434/api/tags")
+        .send()
+        .await
+        .map_err(|e| {
+            let error_msg = format!("モデル一覧取得失敗: {}", e);
+            println!("{}", error_msg);
+            error_msg
+        })?;
+
+    let json: serde_json::Value = res
+        .json()
+        .await
+        .map_err(|e| {
+            let error_msg = format!("JSONパース失敗: {}", e);
+            println!("{}", error_msg);
+            error_msg
+        })?;
+
+    if let Some(models) = json["models"].as_array() {
+        let model_names: Vec<String> = models
+            .iter()
+            .filter_map(|model| model["name"].as_str())
+            .filter(|name| name.starts_with("gemma3:1b") || name.starts_with("gemma3:4b"))
+            .map(|s| s.to_string())
+            .collect();
+        
+        println!("利用可能なGemma3モデル: {:?}", model_names);
+        Ok(model_names)
+    } else {
+        println!("モデル一覧が見つかりません");
+        // デフォルトモデルを返す
+        Ok(vec!["gemma3:4b".to_string(), "gemma3:1b".to_string()])
+    }
+}
+
+// モデル選択付きテキスト生成
+#[command]
+async fn generate_text_with_model(prompt: String, model: String) -> Result<String, String> {
+    println!("generate_text_with_model 呼び出し: model = {}, prompt = {}", model, mask_prompt_for_log(&prompt));
+    
+    // 指定されたモデルが許可リストにあるかチェック
+    if !model.starts_with("gemma3:1b") && !model.starts_with("gemma3:4b") {
+        return Err("サポートされていないモデルです。gemma3:1bまたはgemma3:4bを使用してください。".to_string());
+    }
+
+    let client = Client::new();
+    let body = json!({
+        "model": model,
+        "prompt": prompt,
+        "stream": false
+    });
+
+    println!("Ollama API へリクエスト送信中... (モデル: {})", model);
+    let res = client
+        .post("http://localhost:11434/api/generate")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| {
+            let error_msg = format!("リクエスト失敗: {}", e);
+            println!("{}", error_msg);
+            error_msg
+        })?;
+
+    println!("レスポンス受信、ステータス: {}", res.status());
+    let json: serde_json::Value = res
+        .json()
+        .await
+        .map_err(|e| {
+            let error_msg = format!("JSONパース失敗: {}", e);
+            println!("{}", error_msg);
+            error_msg
+        })?;
+
     if let Some(resp) = json["response"].as_str() {
         println!("応答取得成功: {}文字", resp.len());
         Ok(resp.to_string())
@@ -199,31 +301,14 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(
-            tauri_plugin_sql::Builder::default()
-                .add_migrations("sqlite:data.db", vec![
-                    Migration {
-                        version: 1,
-                        description: "create_discussion_sessions_table",
-                        sql: "CREATE TABLE IF NOT EXISTS discussion_sessions (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            topic TEXT NOT NULL,
-                            participants TEXT NOT NULL,
-                            messages TEXT NOT NULL,
-                            created_at TEXT NOT NULL,
-                            updated_at TEXT NOT NULL
-                        );",
-                        kind: MigrationKind::Up,
-                    },
-                ])
-                .build(),
-        )
         .invoke_handler(tauri::generate_handler![
             // テスト用コマンド
             test_generate_text,
             // AI関連コマンド
             is_model_loaded,
             generate_text,
+            generate_text_with_model,
+            get_available_models,
             generate_ai_response,
             start_discussion,
             analyze_discussion_points,

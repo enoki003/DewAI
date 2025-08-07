@@ -1,47 +1,68 @@
-import Database from '@tauri-apps/plugin-sql';
-
-// データベース接続の管理
-let db: Database | null = null;
+// ローカルストレージベースのデータベース実装
 
 export interface SavedSession {
   id: number;
   topic: string;
   participants: string; // JSON string
   messages: string; // JSON string
+  model: string; // 使用AIモデル名 (例: "gemma3:1b")
   created_at: string;
   updated_at: string;
 }
 
-// データベース接続を取得
-async function getDatabase(): Promise<Database> {
-  if (!db) {
-    console.log('💾 SQLiteデータベース接続開始...');
-    db = await Database.load('sqlite:data.db');
-    console.log('✅ SQLiteデータベース接続完了');
+// ローカルストレージからセッションデータを取得
+function getSessionsFromStorage(): SavedSession[] {
+  try {
+    const sessionsData = localStorage.getItem('dewai_sessions');
+    return sessionsData ? JSON.parse(sessionsData) : [];
+  } catch (error) {
+    console.error('セッションデータの読み込みエラー:', error);
+    return [];
   }
-  return db;
+}
+
+// ローカルストレージにセッションデータを保存
+function saveSessionsToStorage(sessions: SavedSession[]): void {
+  try {
+    localStorage.setItem('dewai_sessions', JSON.stringify(sessions));
+  } catch (error) {
+    console.error('セッションデータの保存エラー:', error);
+    throw error;
+  }
+}
+
+// 次のIDを生成
+function getNextId(): number {
+  const sessions = getSessionsFromStorage();
+  return sessions.length > 0 ? Math.max(...sessions.map(s => s.id)) + 1 : 1;
 }
 
 // 議論セッションを保存
 export async function saveSession(
   topic: string,
   participants: string,
-  messages: string
+  messages: string,
+  model: string = 'gemma3:4b' // デフォルトモデル
 ): Promise<number> {
   console.log('💾 セッション保存開始:', topic);
   
-  const database = await getDatabase();
+  const sessions = getSessionsFromStorage();
   const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const sessionId = getNextId();
   
-  const result = await database.execute(
-    'INSERT INTO discussion_sessions (topic, participants, messages, created_at, updated_at) VALUES ($1, $2, $3, $4, $5)',
-    [topic, participants, messages, now, now]
-  );
+  const newSession: SavedSession = {
+    id: sessionId,
+    topic,
+    participants,
+    messages,
+    model,
+    created_at: now,
+    updated_at: now
+  };
   
-  const sessionId = result.lastInsertId;
-  if (sessionId === undefined) {
-    throw new Error('セッション保存に失敗しました: IDが取得できませんでした');
-  }
+  sessions.push(newSession);
+  saveSessionsToStorage(sessions);
+  
   console.log('✅ セッション保存完了: ID', sessionId);
   return sessionId;
 }
@@ -53,13 +74,18 @@ export async function updateSession(
 ): Promise<void> {
   console.log('🔄 セッション更新開始: ID', sessionId);
   
-  const database = await getDatabase();
-  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const sessions = getSessionsFromStorage();
+  const sessionIndex = sessions.findIndex(s => s.id === sessionId);
   
-  await database.execute(
-    'UPDATE discussion_sessions SET messages = $1, updated_at = $2 WHERE id = $3',
-    [messages, now, sessionId]
-  );
+  if (sessionIndex === -1) {
+    throw new Error(`セッション ID ${sessionId} が見つかりません`);
+  }
+  
+  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  sessions[sessionIndex].messages = messages;
+  sessions[sessionIndex].updated_at = now;
+  
+  saveSessionsToStorage(sessions);
   
   console.log('✅ セッション更新完了: ID', sessionId);
 }
@@ -68,28 +94,24 @@ export async function updateSession(
 export async function getAllSessions(): Promise<SavedSession[]> {
   console.log('📋 全セッション取得開始');
   
-  const database = await getDatabase();
-  const result = await database.select<SavedSession[]>(
-    'SELECT id, topic, participants, messages, created_at, updated_at FROM discussion_sessions ORDER BY updated_at DESC'
-  );
+  const sessions = getSessionsFromStorage();
+  // updated_at でソート（新しい順）
+  sessions.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
   
-  console.log('✅ セッション取得完了:', result.length, '件');
-  return result;
+  console.log('✅ セッション取得完了:', sessions.length, '件');
+  return sessions;
 }
 
 // 特定セッションを取得
 export async function getSessionById(sessionId: number): Promise<SavedSession | null> {
   console.log('📖 セッション取得開始: ID', sessionId);
   
-  const database = await getDatabase();
-  const result = await database.select<SavedSession[]>(
-    'SELECT id, topic, participants, messages, created_at, updated_at FROM discussion_sessions WHERE id = $1',
-    [sessionId]
-  );
+  const sessions = getSessionsFromStorage();
+  const session = sessions.find(s => s.id === sessionId);
   
-  if (result.length > 0) {
+  if (session) {
     console.log('✅ セッション取得完了: ID', sessionId);
-    return result[0];
+    return session;
   } else {
     console.log('⚠️ セッションが見つかりません: ID', sessionId);
     return null;
@@ -100,20 +122,19 @@ export async function getSessionById(sessionId: number): Promise<SavedSession | 
 export async function deleteSession(sessionId: number): Promise<void> {
   console.log('🗑️ セッション削除開始: ID', sessionId);
   
-  const database = await getDatabase();
-  await database.execute(
-    'DELETE FROM discussion_sessions WHERE id = $1',
-    [sessionId]
-  );
+  const sessions = getSessionsFromStorage();
+  const filteredSessions = sessions.filter(s => s.id !== sessionId);
+  
+  if (sessions.length === filteredSessions.length) {
+    throw new Error(`セッション ID ${sessionId} が見つかりません`);
+  }
+  
+  saveSessionsToStorage(filteredSessions);
   
   console.log('✅ セッション削除完了: ID', sessionId);
 }
 
-// データベース接続を閉じる
+// データベース接続を閉じる（ローカルストレージの場合は何もしない）
 export async function closeDatabase(): Promise<void> {
-  if (db) {
-    await db.close();
-    db = null;
-    console.log('🔒 データベース接続を閉じました');
-  }
+  console.log('🔒 データベース接続を閉じました（ローカルストレージ）');
 }

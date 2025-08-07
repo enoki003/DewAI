@@ -1,159 +1,166 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { 
-  showOllamaConnectionError, 
-  showModelLoadSuccess,
-  showAnalysisError 
-} from '../components/ui/notifications';
 
-interface AIModelError {
-  message: string;
+export interface AIModel {
+  name: string;
+  displayName: string;
 }
 
-export function useAIModel() {
+export const useAIModel = () => {
   const [isModelLoaded, setIsModelLoaded] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [error, setError] = useState<AIModelError | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string>('gemma3:4b');
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
 
+  // モデル状態をチェック
+  const checkModelStatus = async (): Promise<boolean> => {
+    try {
+      const result = await invoke<boolean>('is_model_loaded');
+      setIsModelLoaded(result);
+      return result;
+    } catch (error) {
+      console.error('モデル状態チェックエラー:', error);
+      setIsModelLoaded(false);
+      return false;
+    }
+  };
+
+  // 利用可能なモデル一覧を取得
+  const loadAvailableModels = async () => {
+    try {
+      const models = await invoke<string[]>('get_available_models');
+      setAvailableModels(models);
+      console.log('利用可能なモデル:', models);
+    } catch (error) {
+      console.error('モデル一覧取得エラー:', error);
+      // エラーの場合はデフォルトモデルを設定
+      setAvailableModels(['gemma3:4b', 'gemma3:1b']);
+    }
+  };
+
+  // 初期化時にモデル状態と利用可能モデルをチェック
   useEffect(() => {
-    const checkModelStatus = async () => {
-      try {
-        const loaded = await invoke<boolean>('is_model_loaded');
-        setIsModelLoaded(loaded);
-        if (loaded) {
-          showModelLoadSuccess();
-        } else {
-          showOllamaConnectionError();
-          setTimeout(checkModelStatus, 2000);
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setError({ message });
-        showOllamaConnectionError();
-      }
-    };
     checkModelStatus();
+    loadAvailableModels();
+    
+    // localStorageから前回選択したモデルを復元
+    const savedModel = localStorage.getItem('selectedModel');
+    if (savedModel && (savedModel.includes('gemma3:1b') || savedModel.includes('gemma3:4b'))) {
+      setSelectedModel(savedModel);
+    }
   }, []);
 
-  async function generateText(prompt: string): Promise<string> {
-    try {
-      const res = await invoke<string>('generate_text', { prompt });
-      return res;
-    } catch (err) {
-      console.error('エラー:', err);
-      return 'エラーが発生しました。';
-    }
-  }
+  // モデル変更時にlocalStorageに保存
+  const changeModel = (model: string) => {
+    setSelectedModel(model);
+    localStorage.setItem('selectedModel', model);
+    console.log('モデル変更:', model);
+  };
 
-  // テスト用のシンプルなAIテキスト生成
-  async function testGenerateText(): Promise<string> {
+  // 選択されたモデルでテキスト生成
+  const generateTextWithModel = async (prompt: string, model?: string): Promise<string> => {
+    const modelToUse = model || selectedModel;
+    console.log('テキスト生成開始:', { prompt: prompt.substring(0, 50) + '...', model: modelToUse });
+    
+    try {
+      const res = await invoke<string>('generate_text_with_model', { 
+        prompt, 
+        model: modelToUse 
+      });
+      console.log('テキスト生成成功');
+      return res;
+    } catch (error) {
+      console.error('テキスト生成エラー:', error);
+      throw error;
+    }
+  };
+
+  // 従来のgenerateText（後方互換性のため）
+  const generateText = async (prompt: string): Promise<string> => {
+    return generateTextWithModel(prompt, selectedModel);
+  };
+
+  const testGenerateText = async (): Promise<string> => {
     try {
       const res = await invoke<string>('test_generate_text');
-      console.log('✅ テスト成功:', res);
+      console.log('テスト成功:', res);
       return res;
-    } catch (err) {
-      console.error('❌ テストエラー:', err);
-      throw err;
+    } catch (error) {
+      console.error('テストエラー:', error);
+      throw error;
     }
-  }
+  };
 
-  async function generateAIResponse(
-    name: string,
+  // AI応答生成（モデル選択対応）
+  const generateAIResponse = async (
+    participantName: string,
     role: string,
     description: string,
     conversationHistory: string,
     discussionTopic: string
-  ): Promise<string> {
-    if (!isModelLoaded) throw new Error('モデルがロードされていません');
-    setIsGenerating(true);
+  ): Promise<string> => {
     try {
-      return await invoke<string>('generate_ai_response', {
-        participantName: name,
+      const res = await invoke<string>('generate_ai_response', {
+        participantName,
         role,
         description,
-        conversationHistory: conversationHistory,
-        discussionTopic: discussionTopic,
+        conversationHistory,
+        discussionTopic
       });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setError({ message });
-      throw new Error(message);
-    } finally {
-      setIsGenerating(false);
+      return res;
+    } catch (error) {
+      console.error('AI応答生成エラー:', error);
+      throw error;
     }
-  }
+  };
 
-  async function startDiscussion(
-    topic: string,
-    participants: string[]
-  ): Promise<string> {
-    if (!isModelLoaded) throw new Error('モデルがロードされていません');
-    setIsGenerating(true);
-    try {
-      return await invoke<string>('start_discussion', {
-        topic,
-        participants,
-      });
-    } catch (err) {
-      console.error('議論開始エラー:', err);
-      throw err;
-    } finally {
-      setIsGenerating(false);
-    }
-  }
-
-  async function summarizeDiscussion(
+  const summarizeDiscussion = async (
     discussionTopic: string,
     conversationHistory: string,
     participants: string[]
-  ): Promise<string> {
-    if (!isModelLoaded) throw new Error('モデルがロードされていません');
-    setIsGenerating(true);
+  ): Promise<string> => {
     try {
-      return await invoke<string>('summarize_discussion', {
-        discussionTopic: discussionTopic,
-        conversationHistory: conversationHistory,
-        participants,
+      const res = await invoke<string>('summarize_discussion', {
+        discussion_topic: discussionTopic,
+        conversation_history: conversationHistory,
+        participants
       });
-    } catch (err) {
-      console.error('要約エラー:', err);
-      throw err;
-    } finally {
-      setIsGenerating(false);
+      return res;
+    } catch (error) {
+      console.error('議論要約エラー:', error);
+      throw error;
     }
-  }
+  };
 
-  async function analyzeDiscussionPoints(
+  const analyzeDiscussionPoints = async (
     discussionTopic: string,
     conversationHistory: string,
     participants: string[]
-  ): Promise<string> {
-    if (!isModelLoaded) throw new Error('モデルがロードされていません');
-    setIsGenerating(true);
+  ): Promise<string> => {
     try {
-      return await invoke<string>('analyze_discussion_points', {
-        discussionTopic: discussionTopic,
-        conversationHistory: conversationHistory,
-        participants,
+      const res = await invoke<string>('analyze_discussion_points', {
+        discussion_topic: discussionTopic,
+        conversation_history: conversationHistory,
+        participants
       });
-    } catch (err) {
-      console.error('議論分析エラー:', err);
-      showAnalysisError('議論分析', `${err}`);
-      throw err;
-    } finally {
-      setIsGenerating(false);
+      return res;
+    } catch (error) {
+      console.error('議論分析エラー:', error);
+      throw error;
     }
-  }
+  };
 
   return {
     isModelLoaded,
-    isGenerating,
-    error,
+    selectedModel,
+    availableModels,
+    checkModelStatus,
+    loadAvailableModels,
+    changeModel,
     generateText,
+    generateTextWithModel,
     testGenerateText,
     generateAIResponse,
-    startDiscussion,
     summarizeDiscussion,
-    analyzeDiscussionPoints,
+    analyzeDiscussionPoints
   };
-}
+};
