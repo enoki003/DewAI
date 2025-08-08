@@ -72,6 +72,33 @@ export const showSessionSaveError = (error: string) => {
   })
 }
 
+// 参加者情報更新 成功/失敗
+export const showParticipantsUpdateSuccess = () => {
+  showNotification({
+    type: "success",
+    title: "参加者情報を更新しました",
+    duration: 2500,
+  })
+}
+
+export const showParticipantsUpdateError = (error: string) => {
+  showNotification({
+    type: "error",
+    title: "参加者情報の更新に失敗しました",
+    description: `エラー詳細: ${error}`,
+    duration: 6000,
+  })
+}
+
+// 分析 成功/エラー
+export const showAnalysisSuccess = () => {
+  showNotification({
+    type: "success",
+    title: "分析が完了しました",
+    duration: 2000,
+  })
+}
+
 // 分析エラー
 export const showAnalysisError = (analysisType: string, error: string) => {
   showNotification({
@@ -82,7 +109,15 @@ export const showAnalysisError = (analysisType: string, error: string) => {
   })
 }
 
-// AI応答エラー
+// AI応答 成功/エラー/注意
+export const showAIResponseGenerated = (name: string) => {
+  showNotification({
+    type: "info",
+    title: `${name}の応答が生成されました`,
+    duration: 2000,
+  })
+}
+
 export const showAIResponseError = (participantName: string, error: string) => {
   showNotification({
     type: "error",
@@ -92,7 +127,16 @@ export const showAIResponseError = (participantName: string, error: string) => {
   })
 }
 
-// Ollama接続エラー
+export const showInputTooLongWarning = (current: number, max = 10000) => {
+  showNotification({
+    type: "warning",
+    title: "メッセージが長すぎます",
+    description: `現在 ${current} 文字です。${max} 文字以内で入力してください。`,
+    duration: 5000,
+  })
+}
+
+// Ollama接続系
 export const showOllamaConnectionError = () => {
   showNotification({
     type: "warning",
@@ -102,7 +146,6 @@ export const showOllamaConnectionError = () => {
   })
 }
 
-// モデルロード成功
 export const showModelLoadSuccess = () => {
   showNotification({
     type: "success",
@@ -112,7 +155,26 @@ export const showModelLoadSuccess = () => {
   })
 }
 
-// 汎用警告
+export const showModelChangeNotice = (model: string) => {
+  showNotification({
+    type: "info",
+    title: "モデルを切り替えました",
+    description: `現在のモデル: ${model}`,
+    duration: 2500,
+  })
+}
+
+// 復元ヒント
+export const showSessionResumeHint = () => {
+  showNotification({
+    type: "info",
+    title: "セッションを復元しました",
+    description: "右下のボタンから応答を再開できます。",
+    duration: 4000,
+  })
+}
+
+// 汎用警告/エラー
 export const showGenericWarning = (title: string, description?: string) => {
   showNotification({
     type: "warning",
@@ -122,7 +184,6 @@ export const showGenericWarning = (title: string, description?: string) => {
   })
 }
 
-// 汎用エラー
 export const showGenericError = (title: string, description?: string) => {
   showNotification({
     type: "error",

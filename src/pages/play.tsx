@@ -28,10 +28,20 @@ import { useAIModel } from '../hooks/useAIModel';
 import { useNavigate } from 'react-router-dom';
 import { 
   showAIResponseError, 
-  showAnalysisError
+  showAnalysisError,
+  showAnalysisSuccess,
+  showParticipantsUpdateSuccess,
+  showParticipantsUpdateError,
+  showAIResponseGenerated,
+  showModelChangeNotice,
+  showOllamaConnectionError,
+  showInputTooLongWarning,
+  showGenericError,
+  showSessionResumeHint
 } from '../components/ui/notifications';
 import { ChatMessage } from '../components/ui/chat-message';
 import { saveSession, updateSession, getSessionById, updateSessionParticipants } from '../utils/database';
+import { extractTopicsFromSummary } from "../utils/text";
 
 interface AICharacter {
   name: string;
@@ -220,6 +230,7 @@ const PlayPage: React.FC = () => {
               if (sessionData.model && sessionData.model !== selectedModel) {
                 console.log('セッション復元: モデル切り替え', selectedModel, '→', sessionData.model);
                 changeModel(sessionData.model);
+                showModelChangeNotice(sessionData.model);
               }
               
               // メッセージを復元（データベースの最新データを使用）
@@ -234,11 +245,12 @@ const PlayPage: React.FC = () => {
               const modelStatus = await checkModelStatus();
               if (!modelStatus) {
                 console.log('⚠️ セッション復元: Ollama接続なし、議論は一時停止状態');
-                alert('Ollamaに接続できません。議論を再開するにはOllamaが必要です。');
+                showOllamaConnectionError();
                 // 議論開始フラグは立てずに、メッセージのみ復元
               } else {
                 setDiscussionStarted(true);
                 console.log('✅ セッション復元: Ollama接続あり、議論状態を復元');
+                showSessionResumeHint();
               }
               
               // ターン状態を復元：最後の発言者に基づいて次のターンを決定
@@ -349,7 +361,7 @@ const PlayPage: React.FC = () => {
     // Ollama接続チェック
     if (!isModelLoaded) {
       console.log('❌ Ollama接続なし、議論開始を中止');
-      alert('Ollamaに接続できません。Ollamaが起動していることを確認してください。');
+      showOllamaConnectionError();
       return;
     }
     
@@ -386,7 +398,7 @@ const PlayPage: React.FC = () => {
     // Ollama接続チェック
     if (!isModelLoaded) {
       console.log('❌ Ollama接続なし、AI応答再開を中止');
-      alert('Ollamaに接続できません。Ollamaが起動していることを確認してください。');
+      showOllamaConnectionError();
       return;
     }
     
@@ -410,7 +422,7 @@ const PlayPage: React.FC = () => {
     
     // 長さ制限チェック（10,000文字まで）
     if (trimmedInput.length > 10000) {
-      alert('⚠️ メッセージが長すぎます。10,000文字以内で入力してください。');
+      showInputTooLongWarning(trimmedInput.length);
       return;
     }
 
@@ -456,7 +468,7 @@ const PlayPage: React.FC = () => {
       }
     } catch (error) {
       console.error('❌ ユーザー発言処理エラー:', error);
-      alert('メッセージの送信中にエラーが発生しました。もう一度お試しください。');
+      showGenericError('メッセージ送信に失敗しました', `${error}`);
       // エラー時は入力をクリアしない
     }
   };
@@ -595,6 +607,7 @@ const PlayPage: React.FC = () => {
           setMessages(latestMessages);
           setRecentMessages(prev => [...prev.slice(-RECENT_TURNS_TO_KEEP + 1), aiMessage]);
           setTotalTurns(prev => prev + 1);
+          showAIResponseGenerated(ai.name);
           
           console.log(`✅ ${ai.name}の応答完了`);
           
@@ -631,27 +644,11 @@ const PlayPage: React.FC = () => {
       await autoSaveSession(latestMessages);
     } catch (error) {
       console.error('❌ processAITurn全体エラー:', error);
-      alert('AI応答の処理中にエラーが発生しました: ' + error);
+      showGenericError('AI応答処理でエラーが発生しました', `${error}`);
     } finally {
       setIsProcessing(false);
       console.log('🏁 processAITurn完了');
     }
-  };
-
-  // 要約から争点を抽出する関数
-  const extractTopicsFromSummary = (summary: string): string[] => {
-    const topics: string[] = [];
-    // 「争点」「論点」「課題」などのキーワードを含む行を抽出
-    const lines = summary.split('\n');
-    lines.forEach(line => {
-      if (line.includes('争点') || line.includes('論点') || line.includes('課題')) {
-        const match = line.match(/[-・](.+?)[:：]/);
-        if (match) {
-          topics.push(match[1].trim());
-        }
-      }
-    });
-    return topics.slice(0, 3); // 最大3つまで
   };
 
   // 議論分析を実行する関数
@@ -734,6 +731,7 @@ const PlayPage: React.FC = () => {
           };
           
           setDiscussionAnalysis(validAnalysis);
+          showAnalysisSuccess();
           console.log('✅ 議論分析完了:', validAnalysis);
         } else {
           throw new Error('分析結果が有効なオブジェクトではありません');
@@ -741,12 +739,11 @@ const PlayPage: React.FC = () => {
       } catch (parseError) {
         console.error('❌ 分析結果のJSONパースに失敗:', parseError);
         console.log('Raw analysis result:', analysisResult);
-        // パースエラーの場合は、エラーメッセージを表示
-        alert('分析結果の解析に失敗しました。コンソールを確認してください。');
+        showAnalysisError('議論分析', `JSON解析に失敗しました: ${parseError}`);
       }
     } catch (error) {
       console.error('❌ 議論分析エラー:', error);
-      alert('議論分析でエラーが発生しました。');
+      showAnalysisError('議論分析', `${error}`);
     } finally {
       setIsProcessing(false);
     }
@@ -869,9 +866,11 @@ const PlayPage: React.FC = () => {
           };
           await updateSessionParticipants(currentSessionId, JSON.stringify(participantsData));
           console.log('✅ セッションの参加者情報を更新しました: ID', currentSessionId);
+          showParticipantsUpdateSuccess();
         }
       } catch (e) {
         console.error('参加者情報の更新に失敗:', e);
+        showParticipantsUpdateError(`${e}`);
       }
       
       setShowEditDialog(false);
