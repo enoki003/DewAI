@@ -1,10 +1,11 @@
-import { Box, VStack, HStack, Text, Button, CardRoot, CardBody, Spinner, Heading, Input, Textarea, Checkbox, DialogRoot, DialogContent, DialogHeader, DialogTitle, DialogBody, DialogFooter, DialogCloseTrigger, FieldRoot, FieldLabel } from '@chakra-ui/react';
+import { Box, VStack, HStack, Text, Button, CardRoot, CardBody, Spinner, Heading, Input, Textarea, Checkbox, Drawer, FieldRoot, FieldLabel } from '@chakra-ui/react';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   showSessionDeleteSuccess,
   showSessionDeleteError,
-  showGenericError 
+  showGenericError,
+  showParticipantsUpdateSuccess,
 } from '../components/ui/notifications';
 import { ConfirmDialog } from '../components/ui/confirm-dialog';
 import { getAllSessions, deleteSession as deleteDatabaseSession, SavedSession, updateSessionParticipants } from '../utils/database';
@@ -35,6 +36,8 @@ export default function SessionsPage() {
   const [editingSession, setEditingSession] = useState<SavedSession | null>(null);
   const [editingAIData, setEditingAIData] = useState<AICharacter[]>([]);
   const [editUserParticipates, setEditUserParticipates] = useState(false);
+  // 続きからトリガーで開かれたかどうか
+  const [continueAfterEdit, setContinueAfterEdit] = useState(false);
 
   useEffect(() => {
     loadSessions();
@@ -88,8 +91,8 @@ export default function SessionsPage() {
     }
   };
 
-  // 参加者情報の編集ダイアログを開く
-  const openEdit = (session: SavedSession) => {
+  // 参加者情報の編集ダイアログを開く（編集 or 続きからモード）
+  const openEdit = (session: SavedSession, continueMode: boolean = false) => {
     try {
       const participantsData = JSON.parse(session.participants);
       let aiData: AICharacter[] = [];
@@ -109,6 +112,7 @@ export default function SessionsPage() {
       setEditingSession(session);
       setEditingAIData(aiData);
       setEditUserParticipates(userParticipates);
+      setContinueAfterEdit(continueMode);
       setEditOpen(true);
     } catch (e) {
       console.error('参加者データ解析エラー:', e);
@@ -142,9 +146,16 @@ export default function SessionsPage() {
       };
 
       await updateSessionParticipants(editingSession.id, JSON.stringify(participantsData));
+      showParticipantsUpdateSuccess();
       setEditOpen(false);
+      const sessionToContinue = editingSession; // navigate 前に退避
       setEditingSession(null);
       await loadSessions();
+
+      // 続きからモードなら、保存後に続きへ遷移
+      if (continueAfterEdit && sessionToContinue) {
+        await continueSession(sessionToContinue);
+      }
     } catch (e) {
       console.error('参加者更新エラー:', e);
       showGenericError('参加者情報の保存に失敗しました', `${e}`);
@@ -248,21 +259,22 @@ export default function SessionsPage() {
                         </Text>
                       </VStack>
                       <HStack gap={2}>
-                        <Button 
-                          size="sm" 
-                          variant="outline"
-                          onClick={() => openEdit(session)}
-                        >
-                          編集
-                        </Button>
+                        {/* 左から: 続きから / 編集 / 削除 の順 */}
                         <Button 
                           size="sm" 
                           colorPalette="green"
                           variant="solid"
-                          onClick={() => continueSession(session)}
+                          onClick={() => openEdit(session, true)}
                           disabled={!isModelLoaded}
                         >
                           {!isModelLoaded ? 'Ollama未接続' : '続きから'}
+                        </Button>
+                        <Button 
+                          size="sm" 
+                          variant="outline"
+                          onClick={() => openEdit(session, false)}
+                        >
+                          編集
                         </Button>
                         <ConfirmDialog
                           trigger={
@@ -291,54 +303,66 @@ export default function SessionsPage() {
         )}
       </Box>
 
-      {/* 編集ダイアログ */}
-      <DialogRoot open={editOpen} onOpenChange={(d) => setEditOpen(d.open)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>AI参加者の編集</DialogTitle>
-            <DialogCloseTrigger />
-          </DialogHeader>
-          <DialogBody>
-            <VStack align="stretch" gap={4}>
-              <Checkbox.Root
-                checked={editUserParticipates}
-                onCheckedChange={(details) => setEditUserParticipates(!!details.checked)}
-              >
-                <Checkbox.Control />
-                <Checkbox.Label>あなた（ユーザー）も参加する</Checkbox.Label>
-              </Checkbox.Root>
+      {/* 編集ドロワー（右側パネル） */}
+      <Drawer.Root open={editOpen} onOpenChange={(d) => setEditOpen(d.open)} placement="end" size="md">
+        <Drawer.Backdrop />
+        <Drawer.Positioner>
+          <Drawer.Content>
+            <Drawer.Header>
+              <HStack justify="space-between" w="full">
+                <Drawer.Title>{continueAfterEdit ? '参加者を確認して続きへ' : 'AI参加者の編集'}</Drawer.Title>
+                <Drawer.CloseTrigger />
+              </HStack>
+            </Drawer.Header>
 
-              {editingAIData.map((ai, index) => (
-                <Box key={index} p={3} borderRadius="md" border="1px solid" borderColor="border.muted">
-                  <VStack align="stretch" gap={2}>
-                    <FieldRoot>
-                      <FieldLabel>名前</FieldLabel>
-                      <Input value={ai.name} onChange={(e) => updateAIDataField(index, 'name', e.target.value)} placeholder="AIの名前" />
-                    </FieldRoot>
-                    <FieldRoot>
-                      <FieldLabel>役職</FieldLabel>
-                      <Input value={ai.role} onChange={(e) => updateAIDataField(index, 'role', e.target.value)} placeholder="例：専門家、司会、反対派 など" />
-                    </FieldRoot>
-                    <FieldRoot>
-                      <FieldLabel>説明</FieldLabel>
-                      <Textarea rows={3} value={ai.description} onChange={(e) => updateAIDataField(index, 'description', e.target.value)} placeholder="得意分野や性格、役割など" />
-                    </FieldRoot>
-                    <HStack justify="flex-end">
-                      <Button size="xs" variant="outline" colorPalette="red" onClick={() => removeAI(index)}>このAIを削除</Button>
-                    </HStack>
-                  </VStack>
-                </Box>
-              ))}
+            <Drawer.Body>
+              <VStack align="stretch" gap={4}>
+                <Checkbox.Root
+                  checked={editUserParticipates}
+                  onCheckedChange={(details) => setEditUserParticipates(!!details.checked)}
+                >
+                  <Checkbox.Control />
+                  <Checkbox.Label>あなた（ユーザー）も参加する</Checkbox.Label>
+                </Checkbox.Root>
 
-              <Button size="sm" variant="outline" onClick={addAI}>AIを追加</Button>
-            </VStack>
-          </DialogBody>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditOpen(false)}>キャンセル</Button>
-            <Button colorPalette="green" onClick={saveEdit}>保存</Button>
-          </DialogFooter>
-        </DialogContent>
-      </DialogRoot>
+                {editingAIData.map((ai, index) => (
+                  <Box key={index} p={3} borderRadius="md" border="1px solid" borderColor="border.muted">
+                    <VStack align="stretch" gap={2}>
+                      <HStack justify="space-between">
+                        <Text fontWeight="bold">AI {index + 1}</Text>
+                        <Button size="xs" variant="outline" colorPalette="red" onClick={() => removeAI(index)}>このAIを削除</Button>
+                      </HStack>
+                      <FieldRoot>
+                        <FieldLabel>名前</FieldLabel>
+                        <Input value={ai.name} onChange={(e) => updateAIDataField(index, 'name', e.target.value)} placeholder="AIの名前" />
+                      </FieldRoot>
+                      <FieldRoot>
+                        <FieldLabel>役職</FieldLabel>
+                        <Input value={ai.role} onChange={(e) => updateAIDataField(index, 'role', e.target.value)} placeholder="例：専門家、司会、反対派 など" />
+                      </FieldRoot>
+                      <FieldRoot>
+                        <FieldLabel>説明</FieldLabel>
+                        <Textarea rows={3} value={ai.description} onChange={(e) => updateAIDataField(index, 'description', e.target.value)} placeholder="得意分野や性格、役割など" />
+                      </FieldRoot>
+                    </VStack>
+                  </Box>
+                ))}
+
+                <Button size="sm" variant="outline" onClick={addAI}>AIを追加</Button>
+              </VStack>
+            </Drawer.Body>
+
+            <Drawer.Footer>
+              <HStack w="full" justify="flex-end">
+                <Button variant="outline" onClick={() => setEditOpen(false)}>キャンセル</Button>
+                <Button colorPalette="green" onClick={saveEdit}>
+                  {continueAfterEdit ? '保存して続きへ' : '保存'}
+                </Button>
+              </HStack>
+            </Drawer.Footer>
+          </Drawer.Content>
+        </Drawer.Positioner>
+      </Drawer.Root>
     </VStack>
   );
 }
