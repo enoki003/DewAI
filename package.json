@@ -11,7 +11,9 @@
     "build:release": "npm run build && npm run tauri build",
     "build:docker": "docker build -t dewai-dev .",
     "dev:docker": "docker-compose up",
-    "dev:docker-build": "docker-compose up --build"
+    "dev:docker-build": "docker-compose up --build",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@chakra-ui/card": "^2.2.0",
@@ -43,7 +45,8 @@
     "autoprefixer": "^10.4.21",
     "postcss": "^8.5.3",
     "typescript": "~5.6.2",
-    "vite": "^6.2.3"
+    "vite": "^6.2.3",
+    "vitest": "^2.0.5"
   },
   "description": "This template should help get you started developing with Tauri, React and Typescript in Vite.",
   "main": "index.js",
