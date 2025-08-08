@@ -67,7 +67,7 @@ export async function saveSession(
   return sessionId;
 }
 
-// 議論セッションを更新
+// 議論セッションを更新（メッセージ）
 export async function updateSession(
   sessionId: number,
   messages: string
@@ -88,6 +88,29 @@ export async function updateSession(
   saveSessionsToStorage(sessions);
   
   console.log('✅ セッション更新完了: ID', sessionId);
+}
+
+// 議論セッションの参加者情報を更新（AI情報など）
+export async function updateSessionParticipants(
+  sessionId: number,
+  participants: string
+): Promise<void> {
+  console.log('🧑‍🤝‍🧑 参加者情報更新開始: ID', sessionId);
+
+  const sessions = getSessionsFromStorage();
+  const sessionIndex = sessions.findIndex(s => s.id === sessionId);
+
+  if (sessionIndex === -1) {
+    throw new Error(`セッション ID ${sessionId} が見つかりません`);
+  }
+
+  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  sessions[sessionIndex].participants = participants;
+  sessions[sessionIndex].updated_at = now;
+
+  saveSessionsToStorage(sessions);
+
+  console.log('✅ 参加者情報更新完了: ID', sessionId);
 }
 
 // 全セッション一覧を取得

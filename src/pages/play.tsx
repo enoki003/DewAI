@@ -8,7 +8,21 @@ import {
   Textarea, 
   Spinner, 
   Badge,
-  Stack
+  Stack,
+  Input
+} from '@chakra-ui/react';
+import {
+  DialogRoot,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogBody,
+  DialogFooter,
+  DialogCloseTrigger
+} from '@chakra-ui/react';
+import {
+  FieldRoot,
+  FieldLabel
 } from '@chakra-ui/react';
 import { useAIModel } from '../hooks/useAIModel';
 import { useNavigate } from 'react-router-dom';
@@ -17,7 +31,7 @@ import {
   showAnalysisError
 } from '../components/ui/notifications';
 import { ChatMessage } from '../components/ui/chat-message';
-import { saveSession, updateSession, getSessionById } from '../utils/database';
+import { saveSession, updateSession, getSessionById, updateSessionParticipants } from '../utils/database';
 
 interface AICharacter {
   name: string;
@@ -56,7 +70,7 @@ interface DiscussionAnalysis {
 
 const PlayPage: React.FC = () => {
   const navigate = useNavigate();
-    const { generateAIResponse, summarizeDiscussion, analyzeDiscussionPoints, isModelLoaded, testGenerateText, selectedModel, changeModel, checkModelStatus } = useAIModel();
+    const { generateAIResponse, summarizeDiscussion, analyzeDiscussionPoints, isModelLoaded, selectedModel, changeModel, checkModelStatus } = useAIModel();
   
   const [config, setConfig] = useState<AIConfig | null>(null);
   const [messages, setMessages] = useState<DiscussionMessage[]>([]);
@@ -93,6 +107,8 @@ const PlayPage: React.FC = () => {
     }
   }, [discussionAnalysis]);
   const [showAnalysis, setShowAnalysis] = useState(false);
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [editingAIData, setEditingAIData] = useState<AICharacter[]>([]);
   
   // 自動スクロール制御用の状態
   const messageAreaRef = useRef<HTMLDivElement>(null);
@@ -294,6 +310,25 @@ const PlayPage: React.FC = () => {
       console.log('📋 設定データ読み込み成功:', parsedConfig);
       setConfig(parsedConfig);
       setPreviousPage('/config'); // 新規作成の場合は/configに戻る
+      
+      // 同じトピックの既存セッション情報があるかチェック
+      const currentSessionInfo = localStorage.getItem('currentSessionInfo');
+      if (currentSessionInfo) {
+        try {
+          const sessionInfo = JSON.parse(currentSessionInfo);
+          if (sessionInfo.topic === parsedConfig.discussionTopic && sessionInfo.sessionId) {
+            console.log('🔄 同じトピックの既存セッション発見:', sessionInfo.sessionId);
+            setCurrentSessionId(sessionInfo.sessionId);
+            setIsResumedSession(true);
+          } else {
+            console.log('🆕 異なるトピック、新規セッション準備');
+            localStorage.removeItem('currentSessionInfo');
+          }
+        } catch (e) {
+          console.log('セッション情報の解析に失敗:', e);
+          localStorage.removeItem('currentSessionInfo');
+        }
+      }
     } catch (error) {
       console.error('設定データの読み込みに失敗:', error);
       navigate('/config');
@@ -320,10 +355,10 @@ const PlayPage: React.FC = () => {
     
     console.log('🎯 startDiscussion 呼び出し', { config, discussionStarted, isProcessing });
     
-    // 新規議論開始時はセッション状態をクリア
+    // 新規議論開始時の初期化（セッションIDはクリアしない）
     if (!isResumedSession) {
-      console.log('🆕 新規議論開始: セッション状態をクリア');
-      setCurrentSessionId(null);
+      console.log('🆕 新規議論開始: 初期化処理');
+      // セッションIDはクリアしない - 一度作成されたら継続使用
       setIsResumedSession(false);
     }
     
@@ -733,7 +768,9 @@ const PlayPage: React.FC = () => {
       hasConfig: !!config,
       configTopic: config?.discussionTopic,
       configAiData: config?.aiData?.length || 0,
-      usingPassedMessages: !!messagesToSave
+      usingPassedMessages: !!messagesToSave,
+      sessionIdType: typeof currentSessionId,
+      sessionIdValue: currentSessionId
     });
     
     if (!config || currentMessages.length === 0) {
@@ -759,9 +796,10 @@ const PlayPage: React.FC = () => {
         messagesPreview: currentMessages.slice(-2).map(m => ({ speaker: m.speaker, message: m.message.substring(0, 50) + '...' }))
       });
 
-      if (currentSessionId) {
+      // セッションIDの有無を厳密にチェック
+      if (currentSessionId && currentSessionId > 0) {
         // 既存セッションの更新
-        console.log('🔄 既存セッション更新中:', currentSessionId);
+        console.log('🔄 既存セッション更新中:', currentSessionId, '(型:', typeof currentSessionId, ')');
         await updateSession(
           currentSessionId,
           JSON.stringify(currentMessages)
@@ -781,8 +819,17 @@ const PlayPage: React.FC = () => {
           JSON.stringify(currentMessages),
           selectedModel // 使用モデル名を保存
         );
+        console.log('📝 新規セッション作成結果:', sessionId, '(型:', typeof sessionId, ')');
         setCurrentSessionId(sessionId);
         setIsResumedSession(true);
+        
+        // セッション情報をlocalStorageに保存して永続化
+        localStorage.setItem('currentSessionInfo', JSON.stringify({
+          sessionId: sessionId,
+          topic: config.discussionTopic,
+          timestamp: new Date().toISOString()
+        }));
+        
         console.log('✅ 新規セッション作成完了（自動保存）:', sessionId);
       }
     } catch (error) {
@@ -791,6 +838,51 @@ const PlayPage: React.FC = () => {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  // AI編集ダイアログを開く関数
+  const openEditDialog = () => {
+    if (config) {
+      setEditingAIData([...config.aiData]);
+      setShowEditDialog(true);
+    }
+  };
+
+  // AI編集を保存する関数
+  const saveAIEdit = async () => {
+    if (config) {
+      const updatedConfig = {
+        ...config,
+        aiData: editingAIData
+      };
+      setConfig(updatedConfig);
+      
+      // localStorageも更新
+      localStorage.setItem('aiConfig', JSON.stringify(updatedConfig));
+
+      // 現在のセッションがあればparticipantsも更新
+      try {
+        if (currentSessionId && currentSessionId > 0) {
+          const participantsData = {
+            userParticipates: updatedConfig.participate,
+            aiData: updatedConfig.aiData
+          };
+          await updateSessionParticipants(currentSessionId, JSON.stringify(participantsData));
+          console.log('✅ セッションの参加者情報を更新しました: ID', currentSessionId);
+        }
+      } catch (e) {
+        console.error('参加者情報の更新に失敗:', e);
+      }
+      
+      setShowEditDialog(false);
+    }
+  };
+
+  // AIデータを更新する関数
+  const updateAIData = (index: number, field: keyof AICharacter, value: string) => {
+    const updated = [...editingAIData];
+    updated[index] = { ...updated[index], [field]: value };
+    setEditingAIData(updated);
   };
 
   if (!config) {
@@ -833,7 +925,15 @@ const PlayPage: React.FC = () => {
             テーマ: {config.discussionTopic}
           </Text>
           <HStack gap={2} minWidth={{ base: "auto", md: "120px" }} justify="flex-end">
-            {/* 自動保存のため手動保存ボタンは削除 */}
+            <Button 
+              size={{ base: "xs", md: "sm" }} 
+              variant="outline"
+              colorPalette="blue"
+              onClick={openEditDialog}
+            >
+              <Text display={{ base: "none", md: "block" }}>AI編集</Text>
+              <Text display={{ base: "block", md: "none" }}>✏️</Text>
+            </Button>
           </HStack>
         </Stack>
 
@@ -922,7 +1022,6 @@ const PlayPage: React.FC = () => {
         <VStack gap={4} flex={1} justify="center" p={{ base: 4, md: 0 }}>
           <Text fontSize={{ base: "md", md: "lg" }}>議論の準備ができました</Text>
           <Text fontSize={{ base: "sm", md: "md" }}>参加者: {participants.length}人</Text>
-          <Text fontSize="xs" color="fg.muted">設定状況: {config ? '✅' : '❌'}</Text>
           <VStack gap={2}>
             <Text fontSize={{ base: "xs", md: "sm" }} color="fg.muted" textAlign="center">
               💬 {config.participate ? '下部の入力エリアから議論を開始できます' : '下部のボタンから自動議論を開始できます'}
@@ -1178,6 +1277,7 @@ const PlayPage: React.FC = () => {
         </Stack>
       )}
 
+      {/* ここでメインのコンテンツVStackを閉じる */}
       </VStack>
 
       {/* モバイル用分析オーバーレイパネル */}
@@ -1206,7 +1306,7 @@ const PlayPage: React.FC = () => {
             maxWidth="90vw"
             maxHeight="80vh"
             width="full"
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
           >
             {/* モバイル用ヘッダー */}
             <HStack
@@ -1463,26 +1563,7 @@ const PlayPage: React.FC = () => {
                      isSaving ? '保存中...' :
                      isProcessing ? '処理中...' : '議論を開始する'}
                   </Button>
-                  {/* テスト用ボタン */}
-                  <Button 
-                    colorPalette="blue" 
-                    onClick={async () => {
-                      console.log('🧪 テスト開始');
-                      try {
-                        const result = await testGenerateText();
-                        console.log('✅ テスト成功:', result);
-                        alert(`テスト成功: ${result}`);
-                      } catch (error) {
-                        console.error('❌ テスト失敗:', error);
-                        alert(`テスト失敗: ${error}`);
-                      }
-                    }}
-                    disabled={!isModelLoaded || isProcessing || isSaving}
-                    variant="outline"
-                    size={{ base: "sm", md: "md" }}
-                  >
-                    🧪 AI接続テスト
-                  </Button>
+
                 </>
               ) : (
                 <Button 
@@ -1499,7 +1580,6 @@ const PlayPage: React.FC = () => {
                   size={{ base: "sm", md: "md" }}
                 >
                   {!isModelLoaded ? 'Ollamaが起動していません' : 
-                   isSaving ? '保存中...' :
                    isWaitingForResume && currentTurn > 0 ? '応答を再開する' :
                    currentTurn !== 0 ? 'AIのターンです' :
                    isSaving ? '保存中...' :
@@ -1544,9 +1624,64 @@ const PlayPage: React.FC = () => {
             </Button>
           </VStack>
         )}
+        
+        
       </Box>
+
+      {/* AI編集ダイアログ */}
+      <DialogRoot open={showEditDialog} onOpenChange={(details) => setShowEditDialog(details.open)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>AI参加者の編集</DialogTitle>
+            <DialogCloseTrigger />
+          </DialogHeader>
+          <DialogBody>
+            <VStack gap={4} align="stretch">
+              {editingAIData.map((ai, index) => (
+                <Box key={index} p={4} borderRadius="md" border="1px solid" borderColor="border.muted">
+                  <VStack gap={3} align="stretch">
+                    <FieldRoot>
+                      <FieldLabel>名前</FieldLabel>
+                      <Input
+                        value={ai.name}
+                        onChange={(e) => updateAIData(index, 'name', e.target.value)}
+                        placeholder="AI の名前"
+                      />
+                    </FieldRoot>
+                    
+                    <FieldRoot>
+                      <FieldLabel>役職</FieldLabel>
+                      <Input
+                        value={ai.role}
+                        onChange={(e) => updateAIData(index, 'role', e.target.value)}
+                        placeholder="AI の役職"
+                      />
+                    </FieldRoot>
+                    
+                    <FieldRoot>
+                      <FieldLabel>説明</FieldLabel>
+                      <Textarea
+                        value={ai.description}
+                        onChange={(e) => updateAIData(index, 'description', e.target.value)}
+                        placeholder="AI の特徴や専門分野"
+                        rows={3}
+                      />
+                    </FieldRoot>
+                  </VStack>
+                </Box>
+              ))}
+            </VStack>
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEditDialog(false)}>
+              キャンセル
+            </Button>
+            <Button colorPalette="green" onClick={saveAIEdit}>
+              保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </DialogRoot>
     </Box>
   );
-};
-
-export default PlayPage;
+};export default PlayPage;
