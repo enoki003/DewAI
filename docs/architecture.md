@@ -59,7 +59,7 @@ CREATE TABLE sessions (
 - 議論開始（/play）
   1) is_model_loaded → 未起動ならダイアログ
   2) ユーザー発言 → messagesへpush → 要約/分析チェック
-  3) AIターン: 各AIについて generate_ai_response を順序実行
+  3) AIターン: 各AIについて generate_ai_response(model=selectedModel) を順序実行
   4) 終了時 autoSaveSession（新規は作成、以後は更新）
 
 - セッション復元（/sessions→/play）
@@ -70,11 +70,12 @@ CREATE TABLE sessions (
 - 要約: 4ターンごとに過去を圧縮し直近のみ保持
 - 分析: 3ターンごとに実行、JSON整形/検証
 - UI: Chakra v3のDialog/Checkbox APIに準拠
-- モデル: Rust側で gemma3:1b/4b のみ許可
+- モデル: FEで選択した `selectedModel` を Rust へ渡して一貫利用
 
-## 7. エラーハンドリング/タイムアウト（課題と改善案）
-- 現状: reqwest に timeout/リトライ無し
-- 改善案: 10s timeout + 指数バックオフ(最大3回) / エラー種別の正規化
+## 7. エラーハンドリング/タイムアウト（改善済）
+- Rust reqwest クライアントに 10s タイムアウトを設定
+- `/api/generate` 呼び出しは最大3回の指数バックオフリトライ
+- ユーザー向けには日本語の簡潔なエラーに正規化
 
 ## 8. パフォーマンス最適化（課題と改善案）
 - 現状: stream=false で一括応答

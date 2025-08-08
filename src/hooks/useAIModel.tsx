@@ -104,7 +104,8 @@ export const useAIModel = () => {
         role,
         description,
         conversationHistory,
-        discussionTopic
+        discussionTopic,
+        model: selectedModel, // 追加
       });
       return res;
     } catch (error) {
@@ -122,7 +123,8 @@ export const useAIModel = () => {
       const res = await invoke<string>('summarize_discussion', {
         discussion_topic: discussionTopic,
         conversation_history: conversationHistory,
-        participants
+        participants,
+        model: selectedModel, // 追加
       });
       return res;
     } catch (error) {
@@ -140,7 +142,8 @@ export const useAIModel = () => {
       const res = await invoke<string>('analyze_discussion_points', {
         discussion_topic: discussionTopic,
         conversation_history: conversationHistory,
-        participants
+        participants,
+        model: selectedModel, // 追加
       });
       return res;
     } catch (error) {
