@@ -40,7 +40,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, index }) => {
     .slice(0, 10000); // 10,000文字制限
   
   return (
-    <VStack align="stretch" gap={5} key={index}>
+    <VStack align="stretch" gap={6} key={index}>
       {/* メッセージ本体 */}
       <HStack 
         align="flex-start" 
@@ -64,8 +64,8 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, index }) => {
         
         {/* メッセージバブル */}
         {message.isUser ? (
-          /* ユーザーメッセージ - 前のデザイン */
-          <Box position="relative" maxW="85%">
+          // ユーザーメッセージ
+          <Box maxW="85%">
             <Box
               bg="green.solid"
               color="green.contrast"
@@ -79,13 +79,12 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, index }) => {
             >
               <Text fontSize="sm" lineHeight="1.4">{sanitizedMessage}</Text>
             </Box>
-            {/* タイムスタンプをメッセージボックスの外の下に配置 */}
+            {/* タイムスタンプは通常フローで下に配置して余白を確保 */}
             <Text 
               fontSize="xs" 
               color="gray.400" 
-              position="absolute"
-              bottom="-20px"
-              left="0"
+              mt={1}
+              textAlign="right"
               whiteSpace="nowrap"
             >
               {message.timestamp.toLocaleTimeString('ja-JP', { 
@@ -95,8 +94,8 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, index }) => {
             </Text>
           </Box>
         ) : (
-          /* AIメッセージ - テーマに準拠したデザイン */
-          <Box position="relative" maxW="70%">
+          // AIメッセージ
+          <Box maxW="70%">
             <Box
               p={3}
               borderRadius="lg"
@@ -121,13 +120,12 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, index }) => {
             >
               <Text lineHeight="1.5">{sanitizedMessage}</Text>
             </Box>
-            {/* タイムスタンプをメッセージボックスの外の下に配置 */}
+            {/* タイムスタンプは通常フローで下に配置 */}
             <Text 
               fontSize="xs" 
               color="gray.400" 
-              position="absolute"
-              bottom="-20px"
-              right="0"
+              mt={1}
+              textAlign="left"
               whiteSpace="nowrap"
             >
               {message.timestamp.toLocaleTimeString('ja-JP', { 

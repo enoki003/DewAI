@@ -1,4 +1,4 @@
-import { Box, VStack, HStack, Text, Button, CardRoot, CardBody, Spinner, Heading, Input, Textarea, Checkbox, Drawer, FieldRoot, FieldLabel } from '@chakra-ui/react';
+import { Box, VStack, HStack, Text, Button, CardRoot, CardBody, Spinner, Heading, Input, Textarea, Checkbox, Drawer, FieldRoot, FieldLabel, Tabs } from '@chakra-ui/react';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -31,13 +31,12 @@ export default function SessionsPage() {
   const navigate = useNavigate();
   const { isModelLoaded } = useAIModel();
 
-  // 編集ダイアログ用状態
+  // 編集ドロワー用状態（プレイ画面と統一: タブ＋緑テーマ）
   const [editOpen, setEditOpen] = useState(false);
   const [editingSession, setEditingSession] = useState<SavedSession | null>(null);
   const [editingAIData, setEditingAIData] = useState<AICharacter[]>([]);
   const [editUserParticipates, setEditUserParticipates] = useState(false);
-  // 続きからトリガーで開かれたかどうか
-  const [continueAfterEdit, setContinueAfterEdit] = useState(false);
+  const [activeEditTab, setActiveEditTab] = useState<string>('ai-0');
 
   useEffect(() => {
     loadSessions();
@@ -71,7 +70,7 @@ export default function SessionsPage() {
         isResume: true
       }));
       
-      // playページに遷移
+      // playページに遷移（即開始）
       navigate('/play');
       
     } catch (error) {
@@ -91,8 +90,8 @@ export default function SessionsPage() {
     }
   };
 
-  // 参加者情報の編集ダイアログを開く（編集 or 続きからモード）
-  const openEdit = (session: SavedSession, continueMode: boolean = false) => {
+  // 参加者情報の編集ドロワーを開く
+  const openEdit = (session: SavedSession) => {
     try {
       const participantsData = JSON.parse(session.participants);
       let aiData: AICharacter[] = [];
@@ -112,7 +111,7 @@ export default function SessionsPage() {
       setEditingSession(session);
       setEditingAIData(aiData);
       setEditUserParticipates(userParticipates);
-      setContinueAfterEdit(continueMode);
+      setActiveEditTab('ai-0');
       setEditOpen(true);
     } catch (e) {
       console.error('参加者データ解析エラー:', e);
@@ -129,11 +128,20 @@ export default function SessionsPage() {
   };
 
   const addAI = () => {
-    setEditingAIData(prev => [...prev, { name: '', role: '', description: '' }]);
+    setEditingAIData(prev => {
+      const next = [...prev, { name: '', role: '', description: '' }];
+      setActiveEditTab(`ai-${next.length - 1}`);
+      return next;
+    });
   };
 
   const removeAI = (index: number) => {
-    setEditingAIData(prev => prev.filter((_, i) => i !== index));
+    setEditingAIData(prev => {
+      const next = prev.filter((_, i) => i !== index);
+      const newIndex = Math.max(0, Math.min(index, next.length - 1));
+      setActiveEditTab(`ai-${newIndex}`);
+      return next;
+    });
   };
 
   const saveEdit = async () => {
@@ -148,14 +156,8 @@ export default function SessionsPage() {
       await updateSessionParticipants(editingSession.id, JSON.stringify(participantsData));
       showParticipantsUpdateSuccess();
       setEditOpen(false);
-      const sessionToContinue = editingSession; // navigate 前に退避
       setEditingSession(null);
       await loadSessions();
-
-      // 続きからモードなら、保存後に続きへ遷移
-      if (continueAfterEdit && sessionToContinue) {
-        await continueSession(sessionToContinue);
-      }
     } catch (e) {
       console.error('参加者更新エラー:', e);
       showGenericError('参加者情報の保存に失敗しました', `${e}`);
@@ -190,7 +192,7 @@ export default function SessionsPage() {
       
       // 旧形式（名前のみ）の場合
       if (Array.isArray(participantsData)) {
-        return participantsData.map(p => p === 'ユーザー' ? 'あなた' : p).join(', ');
+        return participantsData.map((p: string) => p === 'ユーザー' ? 'あなた' : p).join(', ');
       }
       
       return '不明な参加者';
@@ -264,7 +266,7 @@ export default function SessionsPage() {
                           size="sm" 
                           colorPalette="green"
                           variant="solid"
-                          onClick={() => openEdit(session, true)}
+                          onClick={() => continueSession(session)}
                           disabled={!isModelLoaded}
                         >
                           {!isModelLoaded ? 'Ollama未接続' : '続きから'}
@@ -272,7 +274,7 @@ export default function SessionsPage() {
                         <Button 
                           size="sm" 
                           variant="outline"
-                          onClick={() => openEdit(session, false)}
+                          onClick={() => openEdit(session)}
                         >
                           編集
                         </Button>
@@ -303,61 +305,80 @@ export default function SessionsPage() {
         )}
       </Box>
 
-      {/* 編集ドロワー（右側パネル） */}
+      {/* 編集ドロワー（右側パネル・タブ付きでプレイ画面と統一） */}
       <Drawer.Root open={editOpen} onOpenChange={(d) => setEditOpen(d.open)} placement="end" size="md">
         <Drawer.Backdrop />
         <Drawer.Positioner>
           <Drawer.Content>
             <Drawer.Header>
               <HStack justify="space-between" w="full">
-                <Drawer.Title>{continueAfterEdit ? '参加者を確認して続きへ' : 'AI参加者の編集'}</Drawer.Title>
+                <Drawer.Title>AI参加者の編集</Drawer.Title>
                 <Drawer.CloseTrigger />
               </HStack>
             </Drawer.Header>
 
             <Drawer.Body>
               <VStack align="stretch" gap={4}>
-                <Checkbox.Root
-                  checked={editUserParticipates}
-                  onCheckedChange={(details) => setEditUserParticipates(!!details.checked)}
-                >
-                  <Checkbox.Control />
-                  <Checkbox.Label>あなた（ユーザー）も参加する</Checkbox.Label>
-                </Checkbox.Root>
+                {/* 参加者設定 */}
+                <Box p={3} bg="green.subtle" borderRadius="md" border="1px solid" borderColor="green.muted">
+                  <Checkbox.Root
+                    checked={editUserParticipates}
+                    onCheckedChange={(details) => setEditUserParticipates(!!details.checked)}
+                  >
+                    <Checkbox.Control />
+                    <Checkbox.Label>あなた（ユーザー）も参加する</Checkbox.Label>
+                  </Checkbox.Root>
+                </Box>
 
-                {editingAIData.map((ai, index) => (
-                  <Box key={index} p={3} borderRadius="md" border="1px solid" borderColor="border.muted">
-                    <VStack align="stretch" gap={2}>
-                      <HStack justify="space-between">
-                        <Text fontWeight="bold">AI {index + 1}</Text>
-                        <Button size="xs" variant="outline" colorPalette="red" onClick={() => removeAI(index)}>このAIを削除</Button>
-                      </HStack>
-                      <FieldRoot>
-                        <FieldLabel>名前</FieldLabel>
-                        <Input value={ai.name} onChange={(e) => updateAIDataField(index, 'name', e.target.value)} placeholder="AIの名前" />
-                      </FieldRoot>
-                      <FieldRoot>
-                        <FieldLabel>役職</FieldLabel>
-                        <Input value={ai.role} onChange={(e) => updateAIDataField(index, 'role', e.target.value)} placeholder="例：専門家、司会、反対派 など" />
-                      </FieldRoot>
-                      <FieldRoot>
-                        <FieldLabel>説明</FieldLabel>
-                        <Textarea rows={3} value={ai.description} onChange={(e) => updateAIDataField(index, 'description', e.target.value)} placeholder="得意分野や性格、役割など" />
-                      </FieldRoot>
+                {/* AIごとの編集（タブ） */}
+                <Tabs.Root value={activeEditTab} onValueChange={(details: any) => setActiveEditTab(details.value)} orientation="vertical">
+                  <HStack align="stretch" gap={4}>
+                    <VStack minW={{ base: 'full', md: '180px' }} align="stretch" gap={2}>
+                      <Tabs.List>
+                        {editingAIData.map((_, idx) => (
+                          <Tabs.Trigger key={idx} value={`ai-${idx}`}>
+                            AI {idx + 1}
+                          </Tabs.Trigger>
+                        ))}
+                      </Tabs.List>
+                      <Button size="xs" variant="outline" onClick={addAI}>＋ AIを追加</Button>
                     </VStack>
-                  </Box>
-                ))}
 
-                <Button size="sm" variant="outline" onClick={addAI}>AIを追加</Button>
+                    <Box flex="1">
+                      {editingAIData.map((ai, idx) => (
+                        <Tabs.Content key={idx} value={`ai-${idx}`}>
+                          <Box p={3} borderRadius="md" border="1px solid" borderColor="border.muted">
+                            <VStack align="stretch" gap={3}>
+                              <HStack justify="space-between">
+                                <Text fontWeight="bold" color="green.fg">AI {idx + 1}</Text>
+                                <Button size="xs" variant="outline" colorPalette="red" onClick={() => removeAI(idx)} disabled={editingAIData.length <= 1}>このAIを削除</Button>
+                              </HStack>
+                              <FieldRoot>
+                                <FieldLabel>名前</FieldLabel>
+                                <Input value={ai.name} onChange={(e) => updateAIDataField(idx, 'name', e.target.value)} placeholder="AI の名前" />
+                              </FieldRoot>
+                              <FieldRoot>
+                                <FieldLabel>役職</FieldLabel>
+                                <Input value={ai.role} onChange={(e) => updateAIDataField(idx, 'role', e.target.value)} placeholder="例：専門家、司会、反対派 など" />
+                              </FieldRoot>
+                              <FieldRoot>
+                                <FieldLabel>説明</FieldLabel>
+                                <Textarea rows={3} value={ai.description} onChange={(e) => updateAIDataField(idx, 'description', e.target.value)} placeholder="得意分野や性格、役割など" />
+                              </FieldRoot>
+                            </VStack>
+                          </Box>
+                        </Tabs.Content>
+                      ))}
+                    </Box>
+                  </HStack>
+                </Tabs.Root>
               </VStack>
             </Drawer.Body>
 
             <Drawer.Footer>
               <HStack w="full" justify="flex-end">
                 <Button variant="outline" onClick={() => setEditOpen(false)}>キャンセル</Button>
-                <Button colorPalette="green" onClick={saveEdit}>
-                  {continueAfterEdit ? '保存して続きへ' : '保存'}
-                </Button>
+                <Button colorPalette="green" onClick={saveEdit}>保存</Button>
               </HStack>
             </Drawer.Footer>
           </Drawer.Content>

@@ -20,17 +20,15 @@
     "security": {
       "csp": null,
       "capabilities": [
-        {
-          "identifier": "main-capability",
-          "description": "Capability for the main window",
-          "context": "local",
-          "windows": ["main"],
-          "permissions": []
-        }
+        "default"
       ]
     }
   },
-  "plugins": {},
+  "plugins": {
+    "sql": {
+      "preload": ["sqlite:dewai.db"]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

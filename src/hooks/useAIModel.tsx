@@ -6,6 +6,10 @@ export interface AIModel {
   displayName: string;
 }
 
+// 許可モデルのプレフィックス（バックエンドと整合）
+const ALLOWED_PREFIXES = ['gemma3:1b', 'gemma3:4b'];
+const isAllowedModel = (m: string) => ALLOWED_PREFIXES.some(p => m?.startsWith(p));
+
 export const useAIModel = () => {
   const [isModelLoaded, setIsModelLoaded] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string>('gemma3:4b');
@@ -42,24 +46,25 @@ export const useAIModel = () => {
     checkModelStatus();
     loadAvailableModels();
     
-    // localStorageから前回選択したモデルを復元
+    // localStorageから前回選択したモデルを復元（許可モデルのみ）
     const savedModel = localStorage.getItem('selectedModel');
-    if (savedModel && (savedModel.includes('gemma3:1b') || savedModel.includes('gemma3:4b'))) {
+    if (savedModel && isAllowedModel(savedModel)) {
       setSelectedModel(savedModel);
     }
   }, []);
 
-  // モデル変更時にlocalStorageに保存
+  // モデル変更時にlocalStorageに保存（許可モデルのみ）
   const changeModel = (model: string) => {
-    setSelectedModel(model);
-    localStorage.setItem('selectedModel', model);
-    console.log('モデル変更:', model);
+    const next = isAllowedModel(model) ? model : 'gemma3:4b';
+    setSelectedModel(next);
+    localStorage.setItem('selectedModel', next);
+    console.log('モデル変更:', next);
   };
 
-  // 選択されたモデルでテキスト生成
+  // 選択されたモデルでテキスト生成（ログ簡潔化）
   const generateTextWithModel = async (prompt: string, model?: string): Promise<string> => {
     const modelToUse = model || selectedModel;
-    console.log('テキスト生成開始:', { prompt: prompt.substring(0, 50) + '...', model: modelToUse });
+    console.log('テキスト生成開始:', { preview: prompt.slice(0, 50) + (prompt.length > 50 ? '...' : ''), model: modelToUse });
     
     try {
       const res = await invoke<string>('generate_text_with_model', { 
@@ -105,7 +110,7 @@ export const useAIModel = () => {
         description,
         conversationHistory,
         discussionTopic,
-        model: selectedModel, // 追加
+        model: selectedModel,
       });
       return res;
     } catch (error) {
@@ -121,10 +126,10 @@ export const useAIModel = () => {
   ): Promise<string> => {
     try {
       const res = await invoke<string>('summarize_discussion', {
-        discussion_topic: discussionTopic,
-        conversation_history: conversationHistory,
+        discussionTopic,
+        conversationHistory,
         participants,
-        model: selectedModel, // 追加
+        model: selectedModel,
       });
       return res;
     } catch (error) {
@@ -140,10 +145,10 @@ export const useAIModel = () => {
   ): Promise<string> => {
     try {
       const res = await invoke<string>('analyze_discussion_points', {
-        discussion_topic: discussionTopic,
-        conversation_history: conversationHistory,
+        discussionTopic,
+        conversationHistory,
         participants,
-        model: selectedModel, // 追加
+        model: selectedModel,
       });
       return res;
     } catch (error) {

@@ -182,9 +182,6 @@ export default defineConfig({
 
 ## 📄 ライセンスと法的考慮事項
 
-### プロジェクトライセンス
-- **DewAI**: ISC License
-
 ### 依存関係ライセンス
 - **React**: MIT License
 - **Tauri**: Apache-2.0 OR MIT License

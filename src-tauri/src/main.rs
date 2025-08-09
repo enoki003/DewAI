@@ -3,15 +3,26 @@
 mod prompts;
 
 use tauri::command;
+use tauri::Emitter;
 use reqwest::Client;
 use serde_json::json;
-use std::time::Duration; // 追加
-use tokio::time::sleep; // 追加
-// use tauri_plugin_sql::{Migration, MigrationKind};
+use std::time::Duration;
+use tokio::time::sleep;
+use tauri_plugin_sql::Builder as SqlBuilder;
 
 // リクエスト設定（タイムアウト/リトライ）
-const REQUEST_TIMEOUT_SECS: u64 = 10; // 10秒タイムアウト
+const REQUEST_TIMEOUT_SECS: u64 = 120; // 120秒タイムアウト
 const MAX_RETRIES: u8 = 3; // 最大3回リトライ
+// 議論分析のための延長タイムアウト
+const ANALYSIS_TIMEOUT_SECS: u64 = 120; // 最大120秒まで待つ
+
+// 許可モデルとエラーメッセージ（共通化）
+const ALLOWED_MODEL_PREFIXES: [&str; 2] = ["gemma3:1b", "gemma3:4b"];
+const ERR_UNSUPPORTED_MODEL: &str = "サポートされていないモデルです。gemma3:1bまたはgemma3:4bを使用してください。";
+
+fn is_allowed_model(model: &str) -> bool {
+    ALLOWED_MODEL_PREFIXES.iter().any(|p| model.starts_with(p))
+}
 
 // ログ用のプロンプトマスキング関数
 fn mask_prompt_for_log(prompt: &str) -> String {
@@ -31,10 +42,10 @@ fn mask_prompt_for_log(prompt: &str) -> String {
     }
 }
 
-// Ollama /api/generate 呼び出し（共通・タイムアウト/リトライ付き）
-async fn call_ollama_generate(model: &str, prompt: &str) -> Result<String, String> {
+// タイムアウト秒を引数で受け取る共通関数
+async fn call_ollama_generate_with_timeout(model: &str, prompt: &str, timeout_secs: u64) -> Result<String, String> {
     let client = Client::builder()
-        .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+        .timeout(Duration::from_secs(timeout_secs))
         .build()
         .map_err(|e| format!("HTTPクライアント初期化失敗: {}", e))?;
 
@@ -46,7 +57,7 @@ async fn call_ollama_generate(model: &str, prompt: &str) -> Result<String, Strin
 
     let mut attempt: u8 = 1;
     loop {
-        println!("Ollama API へリクエスト送信中... (モデル: {}, 試行: {}/{})", model, attempt, MAX_RETRIES);
+        println!("Ollama API へリクエスト送信中... (モデル: {}, 試行: {}/{}, timeout={}s)", model, attempt, MAX_RETRIES, timeout_secs);
         let resp = client
             .post("http://localhost:11434/api/generate")
             .json(&body)
@@ -77,6 +88,96 @@ async fn call_ollama_generate(model: &str, prompt: &str) -> Result<String, Strin
         // バックオフ
         let backoff_ms = 300u64.saturating_mul(2u64.saturating_pow((attempt - 1) as u32));
         println!("{}ms 後に再試行します...", backoff_ms);
+        sleep(Duration::from_millis(backoff_ms)).await;
+        attempt += 1;
+    }
+}
+
+// 既存のデフォルト関数は上記を呼び出す
+async fn call_ollama_generate(model: &str, prompt: &str) -> Result<String, String> {
+    call_ollama_generate_with_timeout(model, prompt, REQUEST_TIMEOUT_SECS).await
+}
+
+// ストリーミング版（逐次トークンをイベントで通知）
+async fn call_ollama_generate_stream(window: &tauri::Window, model: &str, prompt: &str, event_name: &str) -> Result<String, String> {
+    let client = Client::builder()
+        .timeout(Duration::from_secs(ANALYSIS_TIMEOUT_SECS.max(REQUEST_TIMEOUT_SECS)))
+        .build()
+        .map_err(|e| format!("HTTPクライアント初期化失敗: {}", e))?;
+
+    let body = json!({
+        "model": model,
+        "prompt": prompt,
+        "stream": true
+    });
+
+    let mut attempt: u8 = 1;
+    loop {
+        println!("Ollama API(Streaming) へリクエスト送信中... (モデル: {}, 試行: {}/{})", model, attempt, MAX_RETRIES);
+        let send_res = client
+            .post("http://localhost:11434/api/generate")
+            .json(&body)
+            .send()
+            .await;
+
+        match send_res {
+            Ok(mut res) => {
+                if !res.status().is_success() {
+                    let st = res.status();
+                    println!("ステータスエラー: {}", st);
+                    if attempt >= MAX_RETRIES { return Err(format!("ステータスエラー: {}", st)); }
+                } else {
+                    let mut buffer = String::new();
+                    let mut full = String::new();
+                    loop {
+                        match res.chunk().await {
+                            Ok(Some(bytes)) => {
+                                let chunk_str = String::from_utf8_lossy(&bytes);
+                                buffer.push_str(&chunk_str);
+                                while let Some(pos) = buffer.find('\n') {
+                                    let line = buffer[..pos].to_string();
+                                    buffer.drain(..=pos);
+                                    let trimmed = line.trim();
+                                    if trimmed.is_empty() { continue; }
+                                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                                        if let Some(token) = v["response"].as_str() {
+                                            if !token.is_empty() {
+                                                full.push_str(token);
+                                                let _ = window.emit(event_name, json!({ "token": token }));
+                                            }
+                                        }
+                                        if v["done"].as_bool() == Some(true) {
+                                            let _ = window.emit(event_name, json!({ "done": true, "full": full }));
+                                            return Ok(full);
+                                        }
+                                    }
+                                }
+                            }
+                            Ok(None) => {
+                                // ストリーム終了
+                                let _ = window.emit(event_name, json!({ "done": true, "full": full }));
+                                return Ok(full);
+                            }
+                            Err(e) => {
+                                println!("ストリーム読み取り失敗: {}", e);
+                                if attempt >= MAX_RETRIES { return Err(format!("ストリーム読み取り失敗: {}", e)); }
+                                break; // リトライへ
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                println!("ストリーミング送信失敗: {}", e);
+                if attempt >= MAX_RETRIES {
+                    return Err(format!("ストリーミング送信失敗: {}", e));
+                }
+            }
+        }
+
+        // バックオフ
+        let backoff_ms = 300u64.saturating_mul(2u64.saturating_pow((attempt - 1) as u32));
+        println!("{}ms 後に再試行します...(stream)", backoff_ms);
         sleep(Duration::from_millis(backoff_ms)).await;
         attempt += 1;
     }
@@ -161,7 +262,7 @@ async fn get_available_models() -> Result<Vec<String>, String> {
         let model_names: Vec<String> = models
             .iter()
             .filter_map(|model| model["name"].as_str())
-            .filter(|name| name.starts_with("gemma3:1b") || name.starts_with("gemma3:4b"))
+            .filter(|name| is_allowed_model(name))
             .map(|s| s.to_string())
             .collect();
         
@@ -177,11 +278,15 @@ async fn get_available_models() -> Result<Vec<String>, String> {
 // モデル選択付きテキスト生成
 #[command]
 async fn generate_text_with_model(prompt: String, model: String) -> Result<String, String> {
-    println!("generate_text_with_model 呼び出し: model = {}, prompt = {}", model, mask_prompt_for_log(&prompt));
+    println!(
+        "generate_text_with_model 呼び出し: model = {}, prompt = {}",
+        model,
+        mask_prompt_for_log(&prompt)
+    );
     
     // 指定されたモデルが許可リストにあるかチェック
-    if !model.starts_with("gemma3:1b") && !model.starts_with("gemma3:4b") {
-        return Err("サポートされていないモデルです。gemma3:1bまたはgemma3:4bを使用してください。".to_string());
+    if !is_allowed_model(&model) {
+        return Err(ERR_UNSUPPORTED_MODEL.to_string());
     }
 
     call_ollama_generate(&model, &prompt).await
@@ -195,7 +300,7 @@ async fn generate_ai_response(
     description: String,
     conversation_history: String,
     discussion_topic: String,
-    model: String, // 追加: 選択モデル
+    model: String,
 ) -> Result<String, String> {
     println!(
         "generate_ai_response 呼び出し: participant_name={}, role={}, description={}, conversation_history=[{}文字], discussion_topic={}, model={}",
@@ -208,8 +313,8 @@ async fn generate_ai_response(
     );
 
     // モデル許可チェック
-    if !model.starts_with("gemma3:1b") && !model.starts_with("gemma3:4b") {
-        return Err("サポートされていないモデルです。gemma3:1bまたはgemma3:4bを使用してください。".to_string());
+    if !is_allowed_model(&model) {
+        return Err(ERR_UNSUPPORTED_MODEL.to_string());
     }
 
     println!("プロンプト生成開始...");
@@ -244,18 +349,19 @@ async fn analyze_discussion_points(
     discussion_topic: String,
     conversation_history: String,
     participants: Vec<String>,
-    model: String, // 追加
+    model: String,
 ) -> Result<String, String> {
     println!("analyze_discussion_points 呼び出し (model={})", model);
-    if !model.starts_with("gemma3:1b") && !model.starts_with("gemma3:4b") {
-        return Err("サポートされていないモデルです。gemma3:1bまたはgemma3:4bを使用してください。".to_string());
+    if !is_allowed_model(&model) {
+        return Err(ERR_UNSUPPORTED_MODEL.to_string());
     }
     let xml_prompt = prompts::build_discussion_analysis_prompt(
         &discussion_topic,
         &conversation_history,
         &participants,
     );
-    call_ollama_generate(&model, &xml_prompt).await
+    // タイムアウト延長版を使用
+    call_ollama_generate_with_timeout(&model, &xml_prompt, ANALYSIS_TIMEOUT_SECS).await
 }
 
 // 議論分析エンジン - 直近の発言のみを対象とした高速分析
@@ -264,59 +370,98 @@ async fn analyze_recent_discussion(
     discussion_topic: String,
     conversation_history: String,
     participants: Vec<String>,
-    model: String, // 追加
+    model: String,
 ) -> Result<String, String> {
     println!("analyze_recent_discussion 呼び出し (model={})", model);
-    if !model.starts_with("gemma3:1b") && !model.starts_with("gemma3:4b") {
-        return Err("サポートされていないモデルです。gemma3:1bまたはgemma3:4bを使用してください。".to_string());
+    if !is_allowed_model(&model) {
+        return Err(ERR_UNSUPPORTED_MODEL.to_string());
     }
     let xml_prompt = prompts::build_lightweight_discussion_analysis_prompt(
         &discussion_topic,
         &conversation_history,
         &participants,
     );
-    call_ollama_generate(&model, &xml_prompt).await
+    // タイムアウト延長版を使用
+    call_ollama_generate_with_timeout(&model, &xml_prompt, ANALYSIS_TIMEOUT_SECS).await
 }
 
-// 議論要約エンジン
+// 議論要約（全文対象）
 #[command]
 async fn summarize_discussion(
     discussion_topic: String,
     conversation_history: String,
-    participants: Vec<String>, // 参加者名のリスト
-    model: String, // 追加
+    participants: Vec<String>,
+    model: String,
 ) -> Result<String, String> {
     println!("summarize_discussion 呼び出し (model={})", model);
-    if !model.starts_with("gemma3:1b") && !model.starts_with("gemma3:4b") {
-        return Err("サポートされていないモデルです。gemma3:1bまたはgemma3:4bを使用してください。".to_string());
+    if !is_allowed_model(&model) {
+        return Err(ERR_UNSUPPORTED_MODEL.to_string());
     }
     let xml_prompt = prompts::build_discussion_summary_prompt(
         &discussion_topic,
         &conversation_history,
         &participants,
     );
-    call_ollama_generate(&model, &xml_prompt).await
+    // 要約も長めに待機
+    call_ollama_generate_with_timeout(&model, &xml_prompt, ANALYSIS_TIMEOUT_SECS).await
 }
 
-fn main() {
-    println!("Tauri バックエンド起動");
+// ストリーミング対応のAI応答
+#[command]
+async fn generate_ai_response_stream(
+    window: tauri::Window,
+    participant_name: String,
+    role: String,
+    description: String,
+    conversation_history: String,
+    discussion_topic: String,
+    model: String,
+) -> Result<String, String> {
+    println!(
+        "generate_ai_response_stream 呼び出し: participant_name={}, role={}, discussion_topic={}, model={}",
+        participant_name,
+        role,
+        discussion_topic,
+        model
+    );
 
+    if !is_allowed_model(&model) {
+        return Err(ERR_UNSUPPORTED_MODEL.to_string());
+    }
+
+    let xml_prompt = prompts::build_ai_response_prompt(
+        &participant_name,
+        &role,
+        &description,
+        &conversation_history,
+        &discussion_topic,
+    );
+
+    // イベント名は固定（フロント側で購読）
+    call_ollama_generate_stream(&window, &model, &xml_prompt, "ai-stream").await
+}
+
+// =========================
+// Tauri アプリ エントリポイント
+// =========================
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(SqlBuilder::default().build())
         .invoke_handler(tauri::generate_handler![
-            // テスト用コマンド
-            test_generate_text,
-            // AI関連コマンド
             is_model_loaded,
+            test_generate_text,
             generate_text,
-            generate_text_with_model,
             get_available_models,
+            generate_text_with_model,
             generate_ai_response,
             start_discussion,
             analyze_discussion_points,
             analyze_recent_discussion,
             summarize_discussion,
+            generate_ai_response_stream
         ])
         .run(tauri::generate_context!())
-        .expect("Tauri 起動失敗");
+        .expect("error while running tauri application");
 }

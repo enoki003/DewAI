@@ -9,16 +9,10 @@ import {
   Spinner, 
   Badge,
   Stack,
-  Input
-} from '@chakra-ui/react';
-import {
-  DialogRoot,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogBody,
-  DialogFooter,
-  DialogCloseTrigger
+  Input,
+  Drawer,
+  Tabs,
+  Checkbox,
 } from '@chakra-ui/react';
 import {
   FieldRoot,
@@ -40,7 +34,7 @@ import {
   showSessionResumeHint
 } from '../components/ui/notifications';
 import { ChatMessage } from '../components/ui/chat-message';
-import { saveSession, updateSession, getSessionById, updateSessionParticipants } from '../utils/database';
+import { saveSession, updateSession, getSessionById, updateSessionParticipants, saveSessionAnalysis } from '../utils/database';
 import { extractTopicsFromSummary } from "../utils/text";
 
 interface AICharacter {
@@ -119,6 +113,9 @@ const PlayPage: React.FC = () => {
   const [showAnalysis, setShowAnalysis] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [editingAIData, setEditingAIData] = useState<AICharacter[]>([]);
+  // 追加: 参加者トグルとタブ選択状態
+  const [editParticipate, setEditParticipate] = useState<boolean>(false);
+  const [activeEditTab, setActiveEditTab] = useState<string>('ai-0');
   
   // 自動スクロール制御用の状態
   const messageAreaRef = useRef<HTMLDivElement>(null);
@@ -163,7 +160,6 @@ const PlayPage: React.FC = () => {
     }
   }, [messages, scrollToBottom]);
   
-  const TURNS_BEFORE_SUMMARY = 4; // 要約を実行するターン数（少し長めに）
   const RECENT_TURNS_TO_KEEP = 4; // 保持する直近ターン数
 
   useEffect(() => {
@@ -475,12 +471,8 @@ const PlayPage: React.FC = () => {
 
   // 要約が必要かチェックし、実行する関数
   const checkAndSummarize = async () => {
-    if (!config || totalTurns % TURNS_BEFORE_SUMMARY !== 0 || totalTurns === 0) {
-      return;
-    }
+    if (!config || messages.length < RECENT_TURNS_TO_KEEP + 2) return;
 
-    console.log(`${totalTurns}ターン目に到達。要約を実行します...`);
-    
     try {
       // 現在の全メッセージから要約対象を抽出（直近分を除く）
       const messagesToSummarize = messages.slice(0, -RECENT_TURNS_TO_KEEP);
@@ -508,6 +500,15 @@ const PlayPage: React.FC = () => {
       // 争点を抽出（簡単な実装）
       const topics = extractTopicsFromSummary(summary);
       setCurrentTopics(topics);
+
+      // DBに要約を保存（セッションがあれば）
+      if (currentSessionId && currentSessionId > 0) {
+        try {
+          await saveSessionAnalysis(currentSessionId, 'summary', JSON.stringify({ summary, topics }));
+        } catch (e) {
+          console.warn('要約保存に失敗:', e);
+        }
+      }
       
       console.log('要約完了:', summary);
     } catch (error) {
@@ -710,28 +711,24 @@ const PlayPage: React.FC = () => {
                 typeof point.point === 'string' && 
                 typeof point.description === 'string'
               ) : [],
-            participantStances: Array.isArray(parsedAnalysis.participantStances) ? 
-              parsedAnalysis.participantStances.filter((stance: any) => 
-                stance && typeof stance === 'object' && 
-                typeof stance.participant === 'string' && 
-                typeof stance.stance === 'string' &&
-                Array.isArray(stance.keyArguments)
-              ) : [],
-            conflicts: Array.isArray(parsedAnalysis.conflicts) ? 
-              parsedAnalysis.conflicts.filter((conflict: any) => 
-                conflict && typeof conflict === 'object' && 
-                typeof conflict.issue === 'string' && 
-                typeof conflict.description === 'string' &&
-                Array.isArray(conflict.sides)
-              ) : [],
-            commonGround: Array.isArray(parsedAnalysis.commonGround) ? 
-              parsedAnalysis.commonGround.filter((item: any) => typeof item === 'string') : [],
-            unexploredAreas: Array.isArray(parsedAnalysis.unexploredAreas) ? 
-              parsedAnalysis.unexploredAreas.filter((item: any) => typeof item === 'string') : []
+            participantStances: Array.isArray(parsedAnalysis.participantStances) ? parsedAnalysis.participantStances.filter((s: any) => s && typeof s.participant === 'string') : [],
+            conflicts: Array.isArray(parsedAnalysis.conflicts) ? parsedAnalysis.conflicts.filter((c: any) => c && typeof c.issue === 'string') : [],
+            commonGround: Array.isArray(parsedAnalysis.commonGround) ? parsedAnalysis.commonGround.filter((item: any) => typeof item === 'string') : [],
+            unexploredAreas: Array.isArray(parsedAnalysis.unexploredAreas) ? parsedAnalysis.unexploredAreas.filter((item: any) => typeof item === 'string') : []
           };
           
           setDiscussionAnalysis(validAnalysis);
           showAnalysisSuccess();
+
+          // DBに分析結果を保存（セッションがあれば）
+          if (currentSessionId && currentSessionId > 0) {
+            try {
+              await saveSessionAnalysis(currentSessionId, 'analysis', JSON.stringify(validAnalysis));
+            } catch (e) {
+              console.warn('分析結果保存に失敗:', e);
+            }
+          }
+
           console.log('✅ 議論分析完了:', validAnalysis);
         } else {
           throw new Error('分析結果が有効なオブジェクトではありません');
@@ -837,20 +834,40 @@ const PlayPage: React.FC = () => {
     }
   };
 
-  // AI編集ダイアログを開く関数
+  // AI編集ダイアログを開く関数（Drawerに変更）
   const openEditDialog = () => {
     if (config) {
       setEditingAIData([...config.aiData]);
+      setEditParticipate(!!config.participate);
+      setActiveEditTab('ai-0');
       setShowEditDialog(true);
     }
   };
 
-  // AI編集を保存する関数
+  // 追加: AIを追加/削除
+  const addAI = () => {
+    setEditingAIData(prev => {
+      const next = [...prev, { name: '', role: '', description: '' }];
+      setActiveEditTab(`ai-${next.length - 1}`);
+      return next;
+    });
+  };
+  const removeAI = (index: number) => {
+    setEditingAIData(prev => {
+      const next = prev.filter((_, i) => i !== index);
+      const newIndex = Math.max(0, Math.min(index, next.length - 1));
+      setActiveEditTab(`ai-${newIndex}`);
+      return next;
+    });
+  };
+
+  // AI編集を保存する関数（participateも反映）
   const saveAIEdit = async () => {
     if (config) {
       const updatedConfig = {
         ...config,
-        aiData: editingAIData
+        aiData: editingAIData,
+        participate: editParticipate,
       };
       setConfig(updatedConfig);
       
@@ -927,7 +944,7 @@ const PlayPage: React.FC = () => {
             <Button 
               size={{ base: "xs", md: "sm" }} 
               variant="outline"
-              colorPalette="blue"
+              colorPalette="green"
               onClick={openEditDialog}
             >
               <Text display={{ base: "none", md: "block" }}>AI編集</Text>
@@ -1627,60 +1644,85 @@ const PlayPage: React.FC = () => {
         
       </Box>
 
-      {/* AI編集ダイアログ */}
-      <DialogRoot open={showEditDialog} onOpenChange={(details) => setShowEditDialog(details.open)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>AI参加者の編集</DialogTitle>
-            <DialogCloseTrigger />
-          </DialogHeader>
-          <DialogBody>
-            <VStack gap={4} align="stretch">
-              {editingAIData.map((ai, index) => (
-                <Box key={index} p={4} borderRadius="md" border="1px solid" borderColor="border.muted">
-                  <VStack gap={3} align="stretch">
-                    <FieldRoot>
-                      <FieldLabel>名前</FieldLabel>
-                      <Input
-                        value={ai.name}
-                        onChange={(e) => updateAIData(index, 'name', e.target.value)}
-                        placeholder="AI の名前"
-                      />
-                    </FieldRoot>
-                    
-                    <FieldRoot>
-                      <FieldLabel>役職</FieldLabel>
-                      <Input
-                        value={ai.role}
-                        onChange={(e) => updateAIData(index, 'role', e.target.value)}
-                        placeholder="AI の役職"
-                      />
-                    </FieldRoot>
-                    
-                    <FieldRoot>
-                      <FieldLabel>説明</FieldLabel>
-                      <Textarea
-                        value={ai.description}
-                        onChange={(e) => updateAIData(index, 'description', e.target.value)}
-                        placeholder="AI の特徴や専門分野"
-                        rows={3}
-                      />
-                    </FieldRoot>
-                  </VStack>
+      {/* AI編集ドロワー（セクション選択・緑テーマ） */}
+      <Drawer.Root open={showEditDialog} onOpenChange={(d) => setShowEditDialog(d.open)} placement="end" size="md">
+        <Drawer.Backdrop />
+        <Drawer.Positioner>
+          <Drawer.Content>
+            <Drawer.Header>
+              <HStack justify="space-between" w="full">
+                <Text fontWeight="bold">AI参加者の編集</Text>
+                <Drawer.CloseTrigger />
+              </HStack>
+            </Drawer.Header>
+
+            <Drawer.Body>
+              <VStack align="stretch" gap={4}>
+                {/* 参加者設定 */}
+                <Box p={3} bg="green.subtle" borderRadius="md" border="1px solid" borderColor="green.muted">
+                  <Checkbox.Root
+                    checked={editParticipate}
+                    onCheckedChange={(details) => setEditParticipate(!!details.checked)}
+                  >
+                    <Checkbox.Control />
+                    <Checkbox.Label>あなた（ユーザー）も参加する</Checkbox.Label>
+                  </Checkbox.Root>
                 </Box>
-              ))}
-            </VStack>
-          </DialogBody>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowEditDialog(false)}>
-              キャンセル
-            </Button>
-            <Button colorPalette="green" onClick={saveAIEdit}>
-              保存
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </DialogRoot>
+
+                {/* AIごとの編集（タブ） */}
+                <Tabs.Root value={activeEditTab} onValueChange={(details: any) => setActiveEditTab(details.value)} orientation="vertical">
+                  <HStack align="stretch" gap={4}>
+                    <VStack minW={{ base: 'full', md: '180px' }} align="stretch" gap={2}>
+                      <Tabs.List>
+                        {editingAIData.map((_, idx) => (
+                          <Tabs.Trigger key={idx} value={`ai-${idx}`}>
+                            AI {idx + 1}
+                          </Tabs.Trigger>
+                        ))}
+                      </Tabs.List>
+                      <Button size="xs" variant="outline" onClick={addAI}>＋ AIを追加</Button>
+                    </VStack>
+
+                    <Box flex="1">
+                      {editingAIData.map((ai, idx) => (
+                        <Tabs.Content key={idx} value={`ai-${idx}`}>
+                          <Box p={3} borderRadius="md" border="1px solid" borderColor="border.muted">
+                            <VStack align="stretch" gap={3}>
+                              <HStack justify="space-between">
+                                <Text fontWeight="bold" color="green.fg">AI {idx + 1}</Text>
+                                <Button size="xs" variant="outline" colorPalette="red" onClick={() => removeAI(idx)} disabled={editingAIData.length <= 1}>このAIを削除</Button>
+                              </HStack>
+                              <FieldRoot>
+                                <FieldLabel>名前</FieldLabel>
+                                <Input value={ai.name} onChange={(e) => updateAIData(idx, 'name', e.target.value)} placeholder="AI の名前" />
+                              </FieldRoot>
+                              <FieldRoot>
+                                <FieldLabel>役職</FieldLabel>
+                                <Input value={ai.role} onChange={(e) => updateAIData(idx, 'role', e.target.value)} placeholder="例：専門家、司会、反対派 など" />
+                              </FieldRoot>
+                              <FieldRoot>
+                                <FieldLabel>説明</FieldLabel>
+                                <Textarea rows={3} value={ai.description} onChange={(e) => updateAIData(idx, 'description', e.target.value)} placeholder="得意分野や性格、役割など" />
+                              </FieldRoot>
+                            </VStack>
+                          </Box>
+                        </Tabs.Content>
+                      ))}
+                    </Box>
+                  </HStack>
+                </Tabs.Root>
+              </VStack>
+            </Drawer.Body>
+
+            <Drawer.Footer>
+              <HStack w="full" justify="flex-end">
+                <Button variant="outline" onClick={() => setShowEditDialog(false)}>キャンセル</Button>
+                <Button colorPalette="green" onClick={saveAIEdit}>保存</Button>
+              </HStack>
+            </Drawer.Footer>
+          </Drawer.Content>
+        </Drawer.Positioner>
+      </Drawer.Root>
     </Box>
   );
 };export default PlayPage;
