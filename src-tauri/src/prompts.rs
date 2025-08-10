@@ -1,5 +1,146 @@
 // プロンプト管理モジュール
 // 各種AI操作用のプロンプトテンプレートを一元管理
+const TPL_DISCUSSION_ANALYSIS: &str = r#"<discussion_analysis>
+<topic>{discussion_topic}</topic>
+<participants>{participants_list}</participants>
+
+<current_conversation>
+{conversation_history}
+</current_conversation>
+
+<instructions>
+この議論を分析し、以下の要素を抽出してください：
+
+1. **主要論点** - 議論の中心となっている具体的な争点
+2. **各参加者の立場** - 参加者ごとの現在の見解や主張
+3. **対立点** - 参加者間で意見が分かれている具体的なポイント
+4. **共通認識** - 参加者が共有している認識や合意点
+5. **未探索領域** - まだ十分に議論されていない関連トピック
+
+JSON形式で以下の構造で出力してください：
+
+{
+  "mainPoints": [
+    {
+      "point": "論点の具体的な内容",
+      "description": "論点の詳細説明"
+    }
+  ],
+  "participantStances": [
+    {
+      "participant": "参加者名",
+      "stance": "その参加者の立場・主張",
+      "keyArguments": ["主要な論拠1", "主要な論拠2"]
+    }
+  ],
+  "conflicts": [
+    {
+      "issue": "対立している具体的な問題",
+      "sides": ["立場A", "立場B"],
+      "description": "対立の詳細"
+    }
+  ],
+  "commonGround": [
+    "共通認識1",
+    "共通認識2"
+  ],
+  "unexploredAreas": [
+    "未探索トピック1",
+    "未探索トピック2"
+  ]
+}
+
+重要：
+- 参加者の立場は現在の発言に基づいて動的に分析する
+- 「ユーザー」も他の参加者と同様に分析対象に含める
+- 実際の発言内容から具体的に抽出する
+- 推測や仮定は避け、発言に基づいた分析のみ行う
+- 出力は純粋なJSONのみで、マークダウンのコードブロック（```json）や説明文は一切含めない
+- 必ず有効なJSON形式で応答すること
+</instructions>
+</discussion_analysis>"#;
+
+const TPL_LIGHT_ANALYSIS: &str = r#"<discussion_analysis>
+<topic>{discussion_topic}</topic>
+<participants>{participants_list}</participants>
+
+<recent_conversation>
+{optimized_history}
+</recent_conversation>
+
+<instructions>
+直近の議論内容を分析し、以下の要素を簡潔に抽出してください：
+
+1. **現在の主要論点** - 最近の発言で議論されている具体的な争点（最大3点）
+2. **活発な参加者の立場** - 最近発言した参加者の現在の見解
+3. **新たな対立点** - 最近浮上した意見の相違（あれば）
+4. **直近の議論の方向性** - 議論がどの方向に進んでいるか
+
+JSON形式で以下の構造で出力してください：
+
+{
+  "currentMainPoints": [
+    {
+      "point": "論点の具体的な内容",
+      "recentness": "高/中/低"
+    }
+  ],
+  "activeParticipants": [
+    {
+      "participant": "参加者名",
+      "recentStance": "最近の立場・主張",
+      "engagement": "発言の活発度（高/中/低）"
+    }
+  ],
+  "newConflicts": [
+    {
+      "issue": "新たに対立している問題",
+      "description": "対立の概要"
+    }
+  ],
+  "discussionDirection": "議論の現在の方向性（一文で）"
+}
+
+重要：
+- 最近の発言内容のみに基づいて分析する
+- 「ユーザー」も他の参加者と同様に分析対象に含める
+- 推測は避け、実際の発言に基づいた分析のみ行う
+- 出力は純粋なJSONのみで、マークダウンのコードブロックや説明文は一切含めない
+- 必ず有効なJSON形式で応答すること
+</instructions>
+</discussion_analysis>"#;
+
+const TPL_AI_PROFILES: &str = r#"<ai_profiles_generation>
+<topic>{discussion_topic}</topic>
+<count>{count}</count>
+<hints>{hint_line}</hints>
+
+<instructions>
+次の議論テーマに適したAI参加者プロフィールを{count}名分、JSON配列のみで生成してください。
+各要素は必ず次のキーを含めてください： name, role, description。
+
+要件：
+- name: 参加者の短い日本語の名前。
+- role: 役職/立場/専門領域
+- description: 100文字前後で、その人物の視点・価値観・発言スタイルを簡潔に説明
+- 参加者間で視点がバラけるように、賛成・反対・懐疑・中立・実務など多様性を持たせる
+
+出力フォーマット（必ず純粋なJSONのみ。前後に説明やコードブロックは付けない）：
+
+[
+  { "name": "", "role": "", "description": "" }
+]
+</instructions>
+</ai_profiles_generation>"#;
+
+// XMLエスケープ（最低限）
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+     .replace('<', "&lt;")
+     .replace('>', "&gt;")
+     .replace('"', "&quot;")
+     .replace('\'', "&apos;")
+}
 
 /// AI応答生成用のプロンプトテンプレートを構築
 pub fn build_ai_response_prompt(
@@ -15,9 +156,12 @@ pub fn build_ai_response_prompt(
         // 会話履歴を最適化（最新15発言程度に制限してパフォーマンス向上）
         optimize_conversation_for_analysis(conversation_history, 15)
     };
-//あえて自分の名前を発言させることで、自分の名前をご出力（デューイ：私は～だと思う）するのを防ぐことはできないだろうか。
-//↑を応用し、あたかも複数のAのうちの一人が自分が異論を捉える可能ように発言させれないだろうか。
-//会話と、誰として何を会話させるのかができればより本格的な議論っぽくなるかもしれない。
+    let topic_e = xml_escape(discussion_topic);
+    let name_e = xml_escape(participant_name);
+    let role_e = xml_escape(role);
+    let desc_e = xml_escape(description);
+    let hist_e = xml_escape(&formatted_history);
+
     format!(
         r#"<discussion_context>
 <discussion_topic>{discussion_topic}</discussion_topic>
@@ -62,17 +206,18 @@ pub fn build_ai_response_prompt(
 日本語で口語の文章で発言してください。
 </instructions>
 </discussion_context>"#,
-        discussion_topic = discussion_topic,
-        participant_name = participant_name,
-        role = role,
-        description = description,
-        conversation_history = conversation_history
+        discussion_topic = topic_e,
+        participant_name = name_e,
+        role = role_e,
+        description = desc_e,
+        conversation_history = hist_e
     )
 }
 
 /// 議論開始用のプロンプトテンプレートを構築
 pub fn build_discussion_start_prompt(topic: &str, participants: &[String]) -> String {
-    let participants_list = participants.join(", ");
+    let participants_list = participants.iter().map(|s| xml_escape(s)).collect::<Vec<_>>().join(", ");
+    let topic_e = xml_escape(topic);
     
     format!(
         r#"<discussion_start>
@@ -91,7 +236,7 @@ pub fn build_discussion_start_prompt(topic: &str, participants: &[String]) -> St
 自然で建設的な議論の開始を促すような発言をお願いします。
 </instructions>
 </discussion_start>"#,
-        topic = topic,
+        topic = topic_e,
         participants_list = participants_list
     )
 }
@@ -102,72 +247,14 @@ pub fn build_discussion_analysis_prompt(
     conversation_history: &str,
     participants: &[String],
 ) -> String {
-    let participants_list = participants.join(", ");
-    
-    format!(
-        r#"<discussion_analysis>
-<topic>{discussion_topic}</topic>
-<participants>{participants_list}</participants>
+    let participants_list = participants.iter().map(|s| xml_escape(s)).collect::<Vec<_>>().join(", ");
+    let topic_e = xml_escape(discussion_topic);
+    let hist_e = xml_escape(conversation_history);
 
-<current_conversation>
-{conversation_history}
-</current_conversation>
-
-<instructions>
-この議論を分析し、以下の要素を抽出してください：
-
-1. **主要論点** - 議論の中心となっている具体的な争点
-2. **各参加者の立場** - 参加者ごとの現在の見解や主張
-3. **対立点** - 参加者間で意見が分かれている具体的なポイント
-4. **共通認識** - 参加者が共有している認識や合意点
-5. **未探索領域** - まだ十分に議論されていない関連トピック
-
-JSON形式で以下の構造で出力してください：
-
-{{
-  "mainPoints": [
-    {{
-      "point": "論点の具体的な内容",
-      "description": "論点の詳細説明"
-    }}
-  ],
-  "participantStances": [
-    {{
-      "participant": "参加者名",
-      "stance": "その参加者の立場・主張",
-      "keyArguments": ["主要な論拠1", "主要な論拠2"]
-    }}
-  ],
-  "conflicts": [
-    {{
-      "issue": "対立している具体的な問題",
-      "sides": ["立場A", "立場B"],
-      "description": "対立の詳細"
-    }}
-  ],
-  "commonGround": [
-    "共通認識1",
-    "共通認識2"
-  ],
-  "unexploredAreas": [
-    "未探索トピック1",
-    "未探索トピック2"
-  ]
-}}
-
-重要：
-- 参加者の立場は現在の発言に基づいて動的に分析する
-- 「ユーザー」も他の参加者と同様に分析対象に含める
-- 実際の発言内容から具体的に抽出する
-- 推測や仮定は避け、発言に基づいた分析のみ行う
-- 出力は純粋なJSONのみで、マークダウンのコードブロック（```json）や説明文は一切含めない
-- 必ず有効なJSON形式で応答すること
-</instructions>
-</discussion_analysis>"#,
-        discussion_topic = discussion_topic,
-        participants_list = participants_list,
-        conversation_history = conversation_history
-    )
+    TPL_DISCUSSION_ANALYSIS
+        .replace("{discussion_topic}", &topic_e)
+        .replace("{participants_list}", &participants_list)
+        .replace("{conversation_history}", &hist_e)
 }
 
 /// 議論要約用のプロンプトテンプレートを構築
@@ -176,7 +263,9 @@ pub fn build_discussion_summary_prompt(
     conversation_history: &str,
     participants: &[String],
 ) -> String {
-    let participants_list = participants.join(", ");
+    let participants_list = participants.iter().map(|s| xml_escape(s)).collect::<Vec<_>>().join(", ");
+    let topic_e = xml_escape(discussion_topic);
+    let hist_e = xml_escape(conversation_history);
     
     format!(
         r#"<discussion_summary>
@@ -224,10 +313,31 @@ pub fn build_discussion_summary_prompt(
 この要約により、議論が深化し続けるようにしてください。
 </instructions>
 </discussion_summary>"#,
-        discussion_topic = discussion_topic,
+        discussion_topic = topic_e,
         participants_list = participants_list,
-        conversation_history = conversation_history
+        conversation_history = hist_e
     )
+}
+
+// 発言境界のヒューリスティック分割（行頭にスピーカー名とコロン/全角コロンが現れる行を新規発言とみなす）
+fn split_messages_heuristic(text: &str) -> Vec<String> {
+    let mut msgs: Vec<String> = Vec::new();
+    let mut current = String::new();
+
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        let colon_pos = trimmed.find(':').or_else(|| trimmed.find('：'));
+        let looks_like_header = colon_pos.map(|pos| pos < 30).unwrap_or(false) && !line.starts_with(' ') && !line.starts_with('\t');
+
+        if looks_like_header && !current.is_empty() {
+            msgs.push(current);
+            current = String::new();
+        }
+        if !current.is_empty() { current.push('\n'); }
+        current.push_str(line);
+    }
+    if !current.is_empty() { msgs.push(current); }
+    msgs
 }
 
 /// 会話履歴を分析用に最適化（重要な発言のみ抽出・要約）
@@ -236,23 +346,14 @@ pub fn optimize_conversation_for_analysis(conversation_history: &str, max_messag
         return "まだ発言はありません。".to_string();
     }
 
-    // 発言を行単位で分割（簡易的な実装）
-    let lines: Vec<&str> = conversation_history.lines().collect();
-    
-    if lines.len() <= max_messages {
+    let msgs = split_messages_heuristic(conversation_history);
+    if msgs.len() <= max_messages {
         return conversation_history.to_string();
     }
 
-    // 直近のmax_messages件の発言を取得
-    let recent_messages = lines.iter()
-        .rev()
-        .take(max_messages)
-        .rev()
-        .cloned()
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    format!("{}[...以前の発言は省略...]", recent_messages)
+    let start = msgs.len().saturating_sub(max_messages);
+    let recent = msgs[start..].join("\n");
+    format!("{}[...以前の発言は省略...]", recent)
 }
 
 /// 議論分析用プロンプト（最近の発言のみを対象）
@@ -261,65 +362,17 @@ pub fn build_lightweight_discussion_analysis_prompt(
     conversation_history: &str,
     participants: &[String],
 ) -> String {
-    let participants_list = participants.join(", ");
+    let participants_list = participants.iter().map(|s| xml_escape(s)).collect::<Vec<_>>().join(", ");
     
     // 会話履歴を最適化（最新10発言程度に制限）
     let optimized_history = optimize_conversation_for_analysis(conversation_history, 10);
+    let topic_e = xml_escape(discussion_topic);
+    let hist_e = xml_escape(&optimized_history);
     
-    format!(
-        r#"<discussion_analysis>
-<topic>{discussion_topic}</topic>
-<participants>{participants_list}</participants>
-
-<recent_conversation>
-{optimized_history}
-</recent_conversation>
-
-<instructions>
-直近の議論内容を分析し、以下の要素を簡潔に抽出してください：
-
-1. **現在の主要論点** - 最近の発言で議論されている具体的な争点（最大3点）
-2. **活発な参加者の立場** - 最近発言した参加者の現在の見解
-3. **新たな対立点** - 最近浮上した意見の相違（あれば）
-4. **直近の議論の方向性** - 議論がどの方向に進んでいるか
-
-JSON形式で以下の構造で出力してください：
-
-{{
-  "currentMainPoints": [
-    {{
-      "point": "論点の具体的な内容",
-      "recentness": "高/中/低"
-    }}
-  ],
-  "activeParticipants": [
-    {{
-      "participant": "参加者名",
-      "recentStance": "最近の立場・主張",
-      "engagement": "発言の活発度（高/中/低）"
-    }}
-  ],
-  "newConflicts": [
-    {{
-      "issue": "新たに対立している問題",
-      "description": "対立の概要"
-    }}
-  ],
-  "discussionDirection": "議論の現在の方向性（一文で）"
-}}
-
-重要：
-- 最近の発言内容のみに基づいて分析する
-- 「ユーザー」も他の参加者と同様に分析対象に含める
-- 推測は避け、実際の発言に基づいた分析のみ行う
-- 出力は純粋なJSONのみで、マークダウンのコードブロックや説明文は一切含めない
-- 必ず有効なJSON形式で応答すること
-</instructions>
-</discussion_analysis>"#,
-        discussion_topic = discussion_topic,
-        participants_list = participants_list,
-        optimized_history = optimized_history
-    )
+    TPL_LIGHT_ANALYSIS
+        .replace("{discussion_topic}", &topic_e)
+        .replace("{participants_list}", &participants_list)
+        .replace("{optimized_history}", &hist_e)
 }
 
 /// AI参加者設定（名前・役職・説明）をJSONで生成するプロンプト
@@ -328,38 +381,18 @@ pub fn build_ai_profiles_prompt(
     desired_count: usize,
     style_hint: &str,
 ) -> String {
+    // バリデーションは呼び出し側に委ねたいが、当面は上限のみ適用
     let count = if desired_count == 0 { 1 } else { desired_count.min(10) };
     let hint_line = if style_hint.is_empty() {
         String::from("（特別な指定はありません）")
     } else {
-        format!("ヒント: {}", style_hint)
+        format!("ヒント: {}", xml_escape(style_hint))
     };
 
-    format!(
-        r#"<ai_profiles_generation>
-<topic>{discussion_topic}</topic>
-<count>{count}</count>
-<hints>{hint_line}</hints>
+    let topic_e = xml_escape(discussion_topic);
 
-<instructions>
-次の議論テーマに適したAI参加者プロフィールを{count}名分、JSON配列のみで生成してください。
-各要素は必ず次のキーを含めてください： name, role, description。
-
-要件：
-- name: 参加者の短い日本語の名前。
-- role: 役職/立場/専門領域
-- description: 100文字前後で、その人物の視点・価値観・発言スタイルを簡潔に説明
-- 参加者間で視点がバラけるように、賛成・反対・懐疑・中立・実務など多様性を持たせる
-
-出力フォーマット（必ず純粋なJSONのみ。前後に説明やコードブロックは付けない）：
-
-[
-  {{ "name": "", "role": "", "description": "" }}
-]
-</instructions>
-</ai_profiles_generation>"#,
-        discussion_topic = discussion_topic,
-        count = count,
-        hint_line = hint_line
-    )
+    TPL_AI_PROFILES
+        .replace("{discussion_topic}", &topic_e)
+        .replace("{count}", &count.to_string())
+        .replace("{hint_line}", &hint_line)
 }
