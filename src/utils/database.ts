@@ -141,15 +141,21 @@ export async function updateSessionParticipants(sessionId: number, participants:
 
 // 全セッション取得（最近開いた順 → なければ更新日時降順）
 export async function getAllSessions(): Promise<SavedSession[]> {
-  await ensureSchema();
-  const conn = getDb();
-  const rows = await conn.select<SavedSession[]>(
-    'SELECT s.id, s.topic, s.participants, s.messages, s.model, s.created_at, s.updated_at \
-     FROM sessions s \
-     LEFT JOIN session_meta m ON m.session_id = s.id \
-     ORDER BY datetime(COALESCE(m.last_opened_at, s.updated_at)) DESC'
-  );
-  return rows ?? [];
+  try {
+    await ensureSchema();
+    const conn = getDb();
+    const rows = await conn.select<SavedSession[]>(
+      'SELECT s.id, s.topic, s.participants, s.messages, s.model, s.created_at, s.updated_at \
+       FROM sessions s \
+       LEFT JOIN session_meta m ON m.session_id = s.id \
+       ORDER BY datetime(COALESCE(m.last_opened_at, s.updated_at)) DESC'
+    );
+    return rows ?? [];
+  } catch (e) {
+    // DBが未初期化/空などのケースでは空配列でスルー
+    console.warn('[db] getAllSessions: 空/未初期化として扱います:', e);
+    return [];
+  }
 }
 
 // ID指定取得

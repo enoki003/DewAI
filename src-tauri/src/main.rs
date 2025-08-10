@@ -434,6 +434,32 @@ async fn generate_ai_response_stream(
     call_ollama_generate_stream(&window, &model, &xml_prompt, "ai-stream").await
 }
 
+// AIプロフィール生成
+#[command]
+async fn generate_ai_profiles(
+    discussion_topic: String,
+    desired_count: Option<u32>,
+    style_hint: Option<String>,
+    model: String,
+) -> Result<String, String> {
+    println!(
+        "generate_ai_profiles 呼び出し: topic='{}', count={:?}, model={}",
+        discussion_topic,
+        desired_count,
+        model
+    );
+    if !is_allowed_model(&model) {
+        return Err(ERR_UNSUPPORTED_MODEL.to_string());
+    }
+    let prompt = prompts::build_ai_profiles_prompt(
+        &discussion_topic,
+        desired_count.unwrap_or(4) as usize,
+        style_hint.unwrap_or_default().as_str(),
+    );
+    // 分析と同等の長めタイムアウトを使う
+    call_ollama_generate_with_timeout(&model, &prompt, ANALYSIS_TIMEOUT_SECS).await
+}
+
 // =========================
 // Tauri アプリ エントリポイント
 // =========================
@@ -453,7 +479,8 @@ pub fn main() {
             analyze_discussion_points,
             analyze_recent_discussion,
             summarize_discussion,
-            generate_ai_response_stream
+            generate_ai_response_stream,
+            generate_ai_profiles
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

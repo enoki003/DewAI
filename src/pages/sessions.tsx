@@ -48,8 +48,9 @@ export default function SessionsPage() {
       const savedSessions = await getAllSessions();
       setSessions(savedSessions);
     } catch (error) {
-      console.error('セッション取得エラー:', error);
-      showGenericError('セッションの取得に失敗しました', `エラー詳細: ${error}`);
+      console.warn('セッション取得（空として扱う）:', error);
+      setSessions([]);
+      // トーストは出さない（空DBを想定ケースとしてスルー）
     } finally {
       setLoading(false);
     }

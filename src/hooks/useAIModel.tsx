@@ -136,6 +136,36 @@ export const useAIModel = () => {
     }
   };
 
+  const generateAIProfiles = async (
+    discussionTopic: string,
+    desiredCount = 4,
+    styleHint = ''
+  ): Promise<Array<{ name: string; role: string; description: string }>> => {
+    try {
+      const raw = await invoke<string>('generate_ai_profiles', {
+        discussionTopic,
+        desiredCount,
+        styleHint,
+        model: selectedModel,
+      });
+      let cleaned = raw.trim();
+      if (cleaned.startsWith('```json')) cleaned = cleaned.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      else if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      const parsed = JSON.parse(cleaned);
+      if (!Array.isArray(parsed)) throw new Error('JSONが配列ではありません');
+      return parsed
+        .filter((p: any) => p && typeof p.name === 'string')
+        .map((p: any) => ({
+          name: String(p.name).trim(),
+          role: String(p.role || '').trim(),
+          description: String(p.description || '').trim(),
+        }));
+    } catch (error) {
+      console.error('AIプロフィール生成エラー:', error);
+      throw error;
+    }
+  };
+
   return {
     isModelLoaded,
     selectedModel,
@@ -149,5 +179,6 @@ export const useAIModel = () => {
     generateAIResponse,
     summarizeDiscussion,
     analyzeDiscussionPoints,
+    generateAIProfiles,
   };
 };

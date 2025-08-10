@@ -4,7 +4,7 @@ interface DiscussionMessage {
   speaker: string;
   message: string;
   isUser: boolean;
-  timestamp: Date;
+  timestamp: Date | string;
 }
 
 interface ChatMessageProps {
@@ -18,17 +18,24 @@ const baseColors = [
   'blue', 'cyan', 'purple', 'pink', 'gray'
 ] as const;
 const getAvatarBaseColor = (name: string): (typeof baseColors)[number] => {
-  const sum = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  return baseColors[sum % baseColors.length];
+  const sum = (name || '').split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  return baseColors[Math.abs(sum) % baseColors.length];
 };
 
 export function ChatMessage({ message, index }: ChatMessageProps) {
-  const baseColor = getAvatarBaseColor(message.speaker);
+  const baseColor = getAvatarBaseColor(message?.speaker || '');
 
   // 表示崩れ防止のための基本的なサニタイゼーション
-  const sanitizedMessage = message.message
+  const rawText = typeof message?.message === 'string' ? message.message : '';
+  const sanitizedMessage = rawText
     .replace(/\t/g, '    ') // タブを4スペースに変換
     .slice(0, 10000); // 10,000文字制限
+
+  // timestampの安全なフォーマット
+  const ts = message?.timestamp instanceof Date ? message.timestamp : new Date(message?.timestamp as any);
+  const timeText = isNaN(ts.getTime())
+    ? ''
+    : ts.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
   
   return (
     <VStack align="stretch" gap={6} key={index}>
@@ -36,22 +43,22 @@ export function ChatMessage({ message, index }: ChatMessageProps) {
       <HStack 
         align="flex-start" 
         gap={3}
-        justify={message.isUser ? "flex-end" : "flex-start"}
+        justify={message?.isUser ? "flex-end" : "flex-start"}
       >
         {/* AIメッセージの場合、左にアバター（Chakra v3 API） */}
-        {!message.isUser && (
+        {!message?.isUser && (
           <VStack gap={1} align="center">
             <Avatar.Root size="sm" colorPalette={baseColor}>
-              <Avatar.Fallback name={message.speaker} />
+              <Avatar.Fallback name={message?.speaker || ''} />
             </Avatar.Root>
             <Text fontSize="xs" color="gray.600" textAlign="center" maxW="60px" lineClamp={1}>
-              {message.speaker}
+              {message?.speaker || 'AI'}
             </Text>
           </VStack>
         )}
         
         {/* メッセージバブル */}
-        {message.isUser ? (
+        {message?.isUser ? (
           // ユーザーメッセージ（以前の配色に準拠）
           <Box maxW="85%">
             <Box
@@ -75,10 +82,7 @@ export function ChatMessage({ message, index }: ChatMessageProps) {
               textAlign="right"
               whiteSpace="nowrap"
             >
-              {message.timestamp.toLocaleTimeString('ja-JP', { 
-                hour: '2-digit', 
-                minute: '2-digit' 
-              })}
+              {timeText}
             </Text>
           </Box>
         ) : (
@@ -116,10 +120,7 @@ export function ChatMessage({ message, index }: ChatMessageProps) {
               textAlign="left"
               whiteSpace="nowrap"
             >
-              {message.timestamp.toLocaleTimeString('ja-JP', { 
-                hour: '2-digit', 
-                minute: '2-digit' 
-              })}
+              {timeText}
             </Text>
           </Box>
         )}

@@ -15,7 +15,9 @@ pub fn build_ai_response_prompt(
         // 会話履歴を最適化（最新15発言程度に制限してパフォーマンス向上）
         optimize_conversation_for_analysis(conversation_history, 15)
     };
-
+//あえて自分の名前を発言させることで、自分の名前をご出力（デューイ：私は～だと思う）するのを防ぐことはできないだろうか。
+//↑を応用し、あたかも複数のAのうちの一人が自分が異論を捉える可能ように発言させれないだろうか。
+//会話と、誰として何を会話させるのかができればより本格的な議論っぽくなるかもしれない。
     format!(
         r#"<discussion_context>
 <discussion_topic>{discussion_topic}</discussion_topic>
@@ -40,12 +42,12 @@ pub fn build_ai_response_prompt(
 </discussion_guidelines>
 
 <instructions>
-あなたは{participant_name}という{role}です。{description}
+あなたは{participant_name}で、役職または職業が{role}です。{description}
 
 議論のテーマは「{discussion_topic}」です。
 上記のdiscussion_guidelinesに従い、議論を深める発言をしてください。
 
-重要：会話履歴で「ユーザー」と表示されているのは参加者の一人です。
+重要：会話履歴で「ユーザー」と表示されているのは参加者の一人です。そして、あなたはあくまで{participant_name}であり、{participant_name}として発言してください。
 
 必須要件：
 - 前の発言者に具体的に反応する（質問に対しては意見を、意見に対しては反応を）
@@ -64,7 +66,7 @@ pub fn build_ai_response_prompt(
         participant_name = participant_name,
         role = role,
         description = description,
-        conversation_history = formatted_history
+        conversation_history = conversation_history
     )
 }
 
@@ -317,5 +319,47 @@ JSON形式で以下の構造で出力してください：
         discussion_topic = discussion_topic,
         participants_list = participants_list,
         optimized_history = optimized_history
+    )
+}
+
+/// AI参加者設定（名前・役職・説明）をJSONで生成するプロンプト
+pub fn build_ai_profiles_prompt(
+    discussion_topic: &str,
+    desired_count: usize,
+    style_hint: &str,
+) -> String {
+    let count = if desired_count == 0 { 1 } else { desired_count.min(10) };
+    let hint_line = if style_hint.is_empty() {
+        String::from("（特別な指定はありません）")
+    } else {
+        format!("ヒント: {}", style_hint)
+    };
+
+    format!(
+        r#"<ai_profiles_generation>
+<topic>{discussion_topic}</topic>
+<count>{count}</count>
+<hints>{hint_line}</hints>
+
+<instructions>
+次の議論テーマに適したAI参加者プロフィールを{count}名分、JSON配列のみで生成してください。
+各要素は必ず次のキーを含めてください： name, role, description。
+
+要件：
+- name: 参加者の短い日本語の名前。
+- role: 役職/立場/専門領域
+- description: 100文字前後で、その人物の視点・価値観・発言スタイルを簡潔に説明
+- 参加者間で視点がバラけるように、賛成・反対・懐疑・中立・実務など多様性を持たせる
+
+出力フォーマット（必ず純粋なJSONのみ。前後に説明やコードブロックは付けない）：
+
+[
+  {{ "name": "", "role": "", "description": "" }}
+]
+</instructions>
+</ai_profiles_generation>"#,
+        discussion_topic = discussion_topic,
+        count = count,
+        hint_line = hint_line
     )
 }

@@ -9,12 +9,13 @@ import {
   Spinner, 
   Badge,
   Stack,
+  // 追加: セッション編集ドロワーで使用
   Input,
-  Drawer,
-  Tabs,
   Checkbox,
+  Drawer,
   FieldRoot,
   FieldLabel,
+  Tabs
 } from '@chakra-ui/react';
 import { useAIModel } from '../hooks/useAIModel';
 import { useNavigate } from 'react-router-dom';
@@ -22,16 +23,17 @@ import {
   showAIResponseError, 
   showAnalysisError,
   showAnalysisSuccess,
-  showParticipantsUpdateSuccess,
-  showParticipantsUpdateError,
   showModelChangeNotice,
   showOllamaConnectionError,
   showInputTooLongWarning,
   showGenericError,
-  showSessionResumeHint
+  showSessionResumeHint,
+  // 追加: 参加者更新トースト
+  showParticipantsUpdateSuccess,
+  showParticipantsUpdateError,
 } from '../components/ui/notifications';
 import { ChatMessage } from '../components/ui/chat-message';
-import { saveSession, updateSession, getSessionById, updateSessionParticipants, saveSessionAnalysis, updateSessionLastOpened } from '../utils/database';
+import { saveSession, updateSession, getSessionById, saveSessionAnalysis, updateSessionLastOpened, updateSessionParticipants } from '../utils/database';
 import { extractTopicsFromSummary } from "../utils/text";
 
 // 参加者（AIプロファイル）
@@ -73,6 +75,7 @@ interface DiscussionAnalysis {
   unexploredAreas: string[];
 }
 
+
 const PlayPage: React.FC = () => {
   const navigate = useNavigate();
   const { generateAIResponse, summarizeDiscussion, analyzeDiscussionPoints, isModelLoaded, selectedModel, changeModel, checkModelStatus } = useAIModel();
@@ -108,93 +111,90 @@ const PlayPage: React.FC = () => {
   const [analysis, setAnalysis] = useState<DiscussionAnalysis | null>(null);
   const [analysisOpen, setAnalysisOpen] = useState(false);
   
-  // 参加者編集
-  const [editorOpen, setEditorOpen] = useState(false);
+  // 参加者編集（セッションページ準拠のドロワー実装）
+  const [editOpen, setEditOpen] = useState(false);
   const [editingBots, setEditingBots] = useState<BotProfile[]>([]);
-  const [includeUser, setIncludeUser] = useState<boolean>(false);
-  const [editTab, setEditTab] = useState<string>('ai-0');
+  const [editUserParticipates, setEditUserParticipates] = useState(false);
+  const [activeEditTab, setActiveEditTab] = useState<string>('ai-0');
 
-  // 参加者編集ハンドラ群
   const openEditor = () => {
     if (!config) return;
-    // 現在の設定を編集用にコピー
-    setEditingBots(config.aiData.map((b) => ({ ...b })));
-    setIncludeUser(!!config.participate);
-    setEditTab('ai-0');
-    setEditorOpen(true);
+    setEditingBots(config.aiData?.map(b => ({ ...b })) || []);
+    setEditUserParticipates(!!config.participate);
+    setActiveEditTab('ai-0');
+    setEditOpen(true);
   };
+  const closeEditor = () => setEditOpen(false);
 
+  const updateBotField = (index: number, field: keyof BotProfile, value: string) => {
+    setEditingBots(prev => {
+      const next = [...prev];
+      next[index] = { ...next[index], [field]: value } as BotProfile;
+      return next;
+    });
+  };
   const addBot = () => {
-    setEditingBots((prev) => {
-      const next = [...prev, { name: `AI ${prev.length + 1}`, role: '参加者', description: '' }];
-      // 新規タブへ移動
-      setEditTab(`ai-${next.length - 1}`);
+    setEditingBots(prev => {
+      const next = [...prev, { name: '', role: '', description: '' }];
+      setActiveEditTab(`ai-${next.length - 1}`);
+      return next;
+    });
+  };
+  const removeBot = (index: number) => {
+    setEditingBots(prev => {
+      const next = prev.filter((_, i) => i !== index);
+      const newIndex = Math.max(0, Math.min(index, next.length - 1));
+      setActiveEditTab(`ai-${newIndex}`);
       return next;
     });
   };
 
-  const removeBot = (idx: number) => {
-    setEditingBots((prev) => {
-      if (prev.length <= 1) return prev; // 最低1名は必須
-      const next = prev.filter((_, i) => i !== idx);
-      // タブ選択調整
-      const newIndex = Math.min(idx, next.length - 1);
-      setEditTab(`ai-${newIndex}`);
-      return next;
-    });
-  };
-
-  const updateBotField = (idx: number, field: keyof BotProfile, value: string) => {
-    setEditingBots((prev) => prev.map((b, i) => (i === idx ? { ...b, [field]: value } : b)));
-  };
-
-  const saveBotEdits = async () => {
+  const saveEdit = async () => {
     if (!config) return;
     try {
       // 入力検証
-      if (editingBots.some((b) => !b.name || !b.name.trim())) {
+      if (editingBots.some(b => !b.name || !b.name.trim())) {
         showParticipantsUpdateError('AI名を入力してください');
         return;
       }
-      const aiData = editingBots.map((b) => ({
+
+      const aiData = editingBots.map(b => ({
         name: b.name.trim(),
         role: (b.role || '').trim(),
         description: (b.description || '').trim(),
       }));
 
-      // 設定更新
-      setConfig((prev) => (prev ? { ...prev, aiData, participate: includeUser } : prev));
+      // 画面状態を更新
+      setConfig(prev => (prev ? { ...prev, aiData, participate: editUserParticipates } : prev));
 
-      // DBへparticipantsを反映
+      // DBへ保存（既存セッション時）
       if (sessionIdRef.current && sessionIdRef.current > 0) {
         try {
           await updateSessionParticipants(
             sessionIdRef.current,
-            JSON.stringify({ userParticipates: includeUser, aiData })
+            JSON.stringify({ userParticipates: editUserParticipates, aiData })
           );
         } catch (e) {
           console.warn('[participants] DB更新失敗:', e);
         }
       }
 
-      // ターン整合（AI数が減った場合のはみ出しを防止）
-      setTurnIndex((prev) => {
-        if (prev === 0) return includeUser ? 0 : aiData.length > 0 ? 1 : 0;
+      // ターンインデックスを整合
+      setTurnIndex(prev => {
+        if (prev === 0) return editUserParticipates ? 0 : aiData.length > 0 ? 1 : 0;
         const aiIdx = prev - 1;
-        if (aiIdx >= aiData.length) {
-          return includeUser ? 0 : aiData.length > 0 ? 1 : 0;
-        }
+        if (aiIdx >= aiData.length) return editUserParticipates ? 0 : aiData.length > 0 ? 1 : 0;
         return prev;
       });
 
       showParticipantsUpdateSuccess();
-      setEditorOpen(false);
+      setEditOpen(false);
     } catch (e) {
       console.error('[participants] 更新失敗:', e);
       showParticipantsUpdateError(`${e}`);
     }
   };
-  
+
   // スクロール制御
   const messageListRef = useRef<HTMLDivElement>(null);
   const [, setUserScrolling] = useState(false);
@@ -389,8 +389,9 @@ const PlayPage: React.FC = () => {
 
     try {
       const userMsg: TalkMessage = { speaker: 'ユーザー', message: trimmed, isUser: true, timestamp: new Date() };
-      const next = [...messages, userMsg];
-      setMessages(next);
+      // 画面反映は関数型更新で競合回避
+      setMessages(prev => [...prev, userMsg]);
+      const next = [...messages, userMsg]; // 保存・AI用のスナップショット
       setRecentWindow(prev => [...prev, userMsg]);
       setInputText('');
       setTurnIndex(1);
@@ -403,7 +404,8 @@ const PlayPage: React.FC = () => {
 
       try {
         setAwaitingAIResume(false);
-        await runAITurn(1);
+        // AIは next（ユーザー発言を含む）を基準に生成
+        await runAITurn(1, next);
       } catch (e) {
         console.error('[ai] 応答失敗:', e);
         showAIResponseError('AI参加者', `${e}`);
@@ -530,7 +532,7 @@ const PlayPage: React.FC = () => {
   };
 
   // AIターン
-  const runAITurn = async (turnOverride?: number) => {
+  const runAITurn = async (turnOverride?: number, baseMessages?: TalkMessage[]) => {
     if (!config) { console.log('[ai] 設定未読込'); return; }
     if (isGenerating || isSavingSession) { console.log('[ai] 多重実行スキップ'); return; }
     if (!isModelLoaded) { showOllamaConnectionError(); return; }
@@ -542,32 +544,54 @@ const PlayPage: React.FC = () => {
     const bot = config.aiData[aiIdx];
     if (!bot) { console.log('[ai] 対応参加者なし', { turn }); return; }
 
+    // 次ターンの自動チェーン用変数
+    let scheduleNextTurn: number | null = null;
+    let nextBase: TalkMessage[] | undefined;
+
     try {
       setIsGenerating(true);
-      const recentLines = messages.slice(-KEEP_RECENT_TURNS).map(m => `${m.speaker}: ${m.message}`).join('\n');
+      const base = baseMessages ?? messages;
+      const recentLines = base.slice(-KEEP_RECENT_TURNS).map(m => `${m.speaker}: ${m.message}`).join('\n');
       const history = historySummary ? `${historySummary}\n${recentLines}` : recentLines;
 
       const response = await generateAIResponse(bot.name, bot.role, bot.description, history, config.discussionTopic);
+      const aiText = typeof response === 'string' ? response : String(response ?? '');
 
-      const aiMsg: TalkMessage = { speaker: bot.name, message: response, isUser: false, timestamp: new Date() };
+      const aiMsg: TalkMessage = { speaker: bot.name, message: aiText, isUser: false, timestamp: new Date() };
 
-      const snapshot = [...messages, aiMsg];
-      setMessages(snapshot);
+      // 関数型更新で追記（上書き防止）
+      setMessages(prev => [...prev, aiMsg]);
       setTurnCount(prev => prev + 1);
 
-      try { await autoSaveSession(snapshot); } catch (e) { console.warn('[save] 自動保存失敗:', e); }
+      nextBase = [...base, aiMsg];
+      try { await autoSaveSession(nextBase); } catch (e) { console.warn('[save] 自動保存失敗:', e); }
 
+      // 次ターンを計算
       const nextIdx = aiIdx + 1;
+      let nextTurnIndex: number;
       if (config.participate) {
-        setTurnIndex(nextIdx < config.aiData.length ? nextIdx + 1 : 0);
+        nextTurnIndex = nextIdx < config.aiData.length ? nextIdx + 1 : 0; // 次AI or ユーザー
       } else {
-        setTurnIndex(nextIdx < config.aiData.length ? nextIdx + 1 : 1);
+        nextTurnIndex = nextIdx < config.aiData.length ? nextIdx + 1 : 1; // 次AI or 最初のAI
+      }
+      setTurnIndex(nextTurnIndex);
+
+      // ユーザー参加ON時で、次もAIなら自動でチェーン
+      if (config.participate && nextTurnIndex > 0) {
+        scheduleNextTurn = nextTurnIndex;
+        setAwaitingAIResume(false);
       }
     } catch (e) {
       console.error('[ai] 応答生成失敗:', e);
       showAIResponseError(bot?.name || 'AI', `${e}`);
     } finally {
       setIsGenerating(false);
+      if (scheduleNextTurn && nextBase) {
+        // 少し遅延して次AIを実行（多重実行ガードをクリアしてから）
+        setTimeout(() => {
+          runAITurn(scheduleNextTurn as number, nextBase);
+        }, 0);
+      }
     }
   };
 
@@ -985,76 +1009,14 @@ const PlayPage: React.FC = () => {
         </Box>
       )}
 
-      {/* 入力エリア（固定） */}
-      <Box borderTop="1px solid" borderColor="border.muted" bg="bg" p={{ base: 3, md: 4 }} width="100%" minWidth="100%">
-        {config.participate && (
-          <VStack width="100%" gap={2}>
-            {turnIndex === 0 && !isGenerating ? (
-              <>
-                <Text fontWeight="bold" fontSize={{ base: "sm", md: "md" }}>あなたのターンです</Text>
-                {!isModelLoaded && (
-                  <Text fontSize={{ base: "xs", md: "sm" }} color="red.solid">⚠️ AIモデルが準備できていません。Ollamaが起動しているか確認してください。</Text>
-                )}
-                <Text fontSize={{ base: "xs", md: "sm" }} color="fg.muted">💡 議論を深めるヒント: 多様な視点や疑問、具体例や根拠を示して論点を深掘りしてください</Text>
-              </>
-            ) : (
-              <Text fontSize={{ base: "sm", md: "md" }} color="fg.muted" textAlign="center">
-                {isGenerating
-                  ? (turnIndex > 0 && config.aiData[turnIndex - 1]
-                      ? `（${config.aiData[turnIndex - 1].name}）が考え中`
-                      : 'AI応答を生成中...')
-                  : (!isActive
-                      ? '議論を開始してください'
-                      : 'AIのターンです')}
-              </Text>
-            )}
-            <VStack align="stretch" gap={2} width="100%" flex="1">
-              <Textarea value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder={!isActive ? "議論開始後に入力できます" : turnIndex === 0 && !isGenerating ? "あなたの意見や質問を入力してください..." : "他の参加者のターンです"} resize="none" rows={3} fontSize={{ base: "sm", md: "md" }} disabled={!isActive || turnIndex !== 0 || isGenerating || isSavingSession} maxLength={10000} width="100%" minWidth="100%" />
-              
-              <HStack justify="space-between">
-                <Text fontSize="xs" color="gray.500">{inputText.length}/10,000文字</Text>
-                {inputText.length > 9000 && (<Text fontSize="xs" color="orange.500">残り{10000 - inputText.length}文字</Text>)}
-              </HStack>
-            </VStack>
-            <HStack width="100%" gap={2}>
-              {!isActive ? (
-                <Button colorPalette="green" onClick={startSession} disabled={!isModelLoaded || isGenerating || isSavingSession} flex="1" size={{ base: "sm", md: "md" }}>{!isModelLoaded ? 'Ollamaが起動していません' : isSavingSession ? '保存中...' : isGenerating ? '処理中...' : '議論を開始する'}</Button>
-              ) : (
-                <Button colorPalette="green" onClick={awaitingAIResume && turnIndex > 0 ? continueAIResponse : handleSubmit} disabled={awaitingAIResume && turnIndex > 0 ? false : (!inputText.trim() || !isModelLoaded || turnIndex !== 0 || isGenerating || isSavingSession)} flex="1" size={{ base: "sm", md: "md" }}>
-                  {!isModelLoaded ? 'Ollamaが起動していません' : awaitingAIResume && turnIndex > 0 ? '応答を再開する' : turnIndex !== 0 ? 'AIのターンです' : isSavingSession ? '保存中...' : '発言する'}
-                </Button>
-              )}
-              {isActive && !config.participate && !isGenerating && (
-                <Button colorPalette="green" onClick={awaitingAIResume ? continueAIResponse : () => runAITurn()} size={{ base: "sm", md: "md" }} variant="outline">{awaitingAIResume ? '応答を再開する' : '次の発言を生成'}</Button>
-              )}
-            </HStack>
-          </VStack>
-        )}
-
-        {!config.participate && (
-          <VStack width="100%" gap={2}>
-            <Text fontSize={{ base: "sm", md: "md" }} color="fg.muted" textAlign="center">
-              {isGenerating
-                ? (turnIndex > 0 && config.aiData[turnIndex - 1]
-                    ? `（${config.aiData[turnIndex - 1].name}）が考え中`
-                    : 'AI応答を生成中...')
-                : (!isActive
-                    ? '議論を開始してください'
-                    : 'AI自動議論モード')}
-            </Text>
-            <Button colorPalette="green" onClick={isActive ? () => runAITurn() : startSession} disabled={isGenerating || !config || isSavingSession} size={{ base: "sm", md: "md" }} width="100%">{!isActive ? '議論開始' : isSavingSession ? '保存中...' : isGenerating ? '処理中...' : '次の発言を生成'}</Button>
-          </VStack>
-        )}
-      </Box>
-
-      {/* 参加者編集ドロワー */}
-      <Drawer.Root open={editorOpen} onOpenChange={(d) => setEditorOpen(d.open)} placement="end" size="md">
+      {/* 参加者編集ドロワー（Sessions準拠） */}
+      <Drawer.Root open={editOpen} onOpenChange={(d) => setEditOpen(d.open)} placement="end" size="md">
         <Drawer.Backdrop />
         <Drawer.Positioner>
           <Drawer.Content>
             <Drawer.Header>
               <HStack justify="space-between" w="full">
-                <Text fontWeight="bold">AI参加者の編集</Text>
+                <Drawer.Title>AI参加者の編集</Drawer.Title>
                 <Drawer.CloseTrigger />
               </HStack>
             </Drawer.Header>
@@ -1064,24 +1026,26 @@ const PlayPage: React.FC = () => {
                 {/* 参加者設定 */}
                 <Box p={3} bg="green.subtle" borderRadius="md" border="1px solid" borderColor="green.muted">
                   <Checkbox.Root
-                    checked={includeUser}
-                    onCheckedChange={(val: any) => setIncludeUser(typeof val === 'boolean' ? val : !!val?.checked)}
+                    checked={editUserParticipates}
+                    onCheckedChange={(details) => setEditUserParticipates(!!details.checked)}
                   >
                     <Checkbox.Control />
                     <Checkbox.Label>あなた（ユーザー）も参加する</Checkbox.Label>
                   </Checkbox.Root>
                 </Box>
 
-                {/* AIごとの編集 */}
-                <Tabs.Root value={editTab} onValueChange={(d: any) => setEditTab(d.value)} orientation="vertical">
+                {/* AIごとの編集（タブ） */}
+                <Tabs.Root value={activeEditTab} onValueChange={(details: any) => setActiveEditTab(details.value)} orientation="vertical">
                   <HStack align="stretch" gap={4}>
                     <VStack minW={{ base: 'full', md: '180px' }} align="stretch" gap={2}>
                       <Tabs.List>
                         {editingBots.map((_, idx) => (
-                          <Tabs.Trigger key={idx} value={`ai-${idx}`}>AI {idx + 1}</Tabs.Trigger>
+                          <Tabs.Trigger key={idx} value={`ai-${idx}`}>
+                            AI {idx + 1}
+                          </Tabs.Trigger>
                         ))}
                       </Tabs.List>
-                      <Button size="xs" variant="outline" onClick={addBot} disabled={editingBots.some(ai => !ai.name?.trim())}>＋ AIを追加</Button>
+                      <Button size="xs" variant="outline" onClick={addBot}>＋ AIを追加</Button>
                     </VStack>
 
                     <Box flex="1">
@@ -1117,13 +1081,78 @@ const PlayPage: React.FC = () => {
 
             <Drawer.Footer>
               <HStack w="full" justify="flex-end">
-                <Button variant="outline" onClick={() => setEditorOpen(false)}>キャンセル</Button>
-                <Button colorPalette="green" onClick={saveBotEdits} disabled={editingBots.some(ai => !ai.name?.trim())}>保存</Button>
+                <Button variant="outline" onClick={closeEditor}>キャンセル</Button>
+                <Button colorPalette="green" onClick={saveEdit}>保存</Button>
               </HStack>
             </Drawer.Footer>
           </Drawer.Content>
         </Drawer.Positioner>
       </Drawer.Root>
+
+      {/* 入力エリア（固定） */}
+      <Box borderTop="1px solid" borderColor="border.muted" bg="bg" p={{ base: 3, md: 4 }} width="100%" minWidth="100%">
+        {config.participate && (
+          <VStack width="100%" gap={2}>
+            {turnIndex === 0 && !isGenerating ? (
+              <>
+                <Text fontWeight="bold" fontSize={{ base: "sm", md: "md" }}>あなたのターンです</Text>
+                {!isModelLoaded && (
+                  <Text fontSize={{ base: "xs", md: "sm" }} color="red.solid">⚠️ AIモデルが準備できていません。Ollamaが起動しているか確認してください。</Text>
+                )}
+                <Text fontSize={{ base: "xs", md: "sm" }} color="fg.muted">💡 議論を深めるヒント: 多様な視点や疑問、具体例や根拠を示して論点を深掘りしてください</Text>
+              </>
+            ) : (
+              <Text fontSize={{ base: "sm", md: "md" }} color="fg.muted" textAlign="center">
+                {isGenerating
+                  ? (turnIndex > 0 && config.aiData[turnIndex - 1]
+                      ? `（${config.aiData[turnIndex - 1].name}）が考え中`
+                      : 'AI応答を生成中...')
+                  : (!isActive
+                      ? '議論を開始してください'
+                      : 'AIのターンです')}
+              </Text>
+            )}
+            <VStack align="stretch" gap={2} width="100%" flex="1">
+              <Textarea value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder={!isActive ? "議論開始後に入力できます" : turnIndex === 0 && !isGenerating ? "あなたの意見や質問を入力してください..." : "他の参加者のターンです"} resize="none" rows={3} fontSize={{ base: "sm", md: "md" }} disabled={!isActive || turnIndex !== 0 || isGenerating || isSavingSession} maxLength={10000} width="100%" minWidth="100%" />
+              
+              <HStack justify="space-between">
+                <Text fontSize="xs" color="gray.500">{inputText.length}/10,000文字</Text>
+                {inputText.length > 9000 && (<Text fontSize="xs" color="orange.500">残り{10000 - inputText.length}文字</Text>)}
+              </HStack>
+            </VStack>
+            <HStack width="100%" gap={2}>
+              {!isActive ? (
+                <Button colorPalette="green" onClick={startSession} disabled={!isModelLoaded || isGenerating || isSavingSession} flex="1" size={{ base: "sm", md: "md" }}>{!isModelLoaded ? 'Ollamaが起動していません' : isSavingSession ? '保存中...' : isGenerating ? '処理中...' : '議論を開始する'}</Button>
+              ) : (
+                <Button colorPalette="green" onClick={awaitingAIResume && turnIndex > 0 ? continueAIResponse : handleSubmit} disabled={awaitingAIResume && turnIndex > 0 ? false : (!inputText.trim() || !isModelLoaded || turnIndex !== 0 || isGenerating || isSavingSession)} flex="1" size={{ base: "sm", md: "md" }}
+                  loading={isGenerating} loadingText="生成中...">
+                  {!isModelLoaded ? 'Ollamaが起動していません' : awaitingAIResume && turnIndex > 0 ? '応答を再開する' : turnIndex !== 0 ? 'AIのターンです' : isSavingSession ? '保存中...' : '発言する'}
+                </Button>
+              )}
+              {isActive && !config.participate && !isGenerating && (
+                <Button colorPalette="green" onClick={awaitingAIResume ? continueAIResponse : () => runAITurn()} size={{ base: "sm", md: "md" }} variant="outline">{awaitingAIResume ? '応答を再開する' : '次の発言を生成'}</Button>
+              )}
+            </HStack>
+          </VStack>
+        )}
+
+        {!config.participate && (
+          <VStack width="100%" gap={2}>
+            <Text fontSize={{ base: "sm", md: "md" }} color="fg.muted" textAlign="center">
+              {isGenerating
+                ? (turnIndex > 0 && config.aiData[turnIndex - 1]
+                    ? `（${config.aiData[turnIndex - 1].name}）が考え中`
+                    : 'AI応答を生成中...')
+                : (!isActive
+                    ? '議論を開始してください'
+                    : 'AI自動議論モード')}
+            </Text>
+            <Button colorPalette="green" onClick={isActive ? () => runAITurn() : startSession} disabled={isGenerating || !config || isSavingSession} size={{ base: "sm", md: "md" }} width="100%">
+              {!isActive ? '議論開始' : isSavingSession ? '保存中...' : isGenerating ? '処理中...' : '次の発言を生成'}
+            </Button>
+          </VStack>
+        )}
+      </Box>
     </Box>
   );
 };

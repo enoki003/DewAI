@@ -27,7 +27,7 @@ import {
 import { useAIModel } from '../hooks/useAIModel';
 
 function Config() {
-  const { selectedModel, changeModel, isModelLoaded } = useAIModel();
+  const { selectedModel, changeModel, isModelLoaded, generateAIProfiles } = useAIModel();
   const [botCount, setBotCount] = React.useState(1);
   const [showFields, setShowFields] = React.useState(false);
   const [participate, setParticipate] = React.useState(true);
@@ -42,12 +42,46 @@ function Config() {
   }
 
   const [bots, setBots] = React.useState<BotProfile[]>([]);
+  const [autoLoading, setAutoLoading] = React.useState<boolean[]>([]);
+
+  React.useEffect(() => {
+    // bots長に合わせてロード配列を整える
+    setAutoLoading(prev => Array.from({ length: bots.length }, (_, i) => prev[i] ?? false));
+  }, [bots.length]);
 
   const handleSubmit = () => {
     const validCount = isNaN(botCount) || botCount === undefined ? 1 : botCount;
     const count = Math.min(Math.max(validCount, 1), 10);
     setBots(Array.from({ length: count }, () => ({ name: "", role: "", description: "" })));
     setShowFields(true);
+  };
+
+  // 単一カードを自動補完
+  const autoFillCard = async (index: number) => {
+    try {
+      if (!discussionTopic.trim()) {
+        alert('議論のテーマを先に入力してください');
+        return;
+      }
+      if (!isModelLoaded) {
+        alert('Ollamaが未接続です。起動後にお試しください。');
+        return;
+      }
+      setAutoLoading(prev => prev.map((v, i) => (i === index ? true : v)));
+      // 役職をヒントに入れて精度を上げる
+      const hintBase = bots[index]?.role ? `この参加者の役割は「${bots[index].role}」。` : '';
+      const list = await generateAIProfiles(discussionTopic.trim(), 1, `${hintBase}1名分のみ生成。名前は重複不可。`);
+      if (list && list[0]) {
+        const next = [...bots];
+        next[index] = list[0];
+        setBots(next);
+      }
+    } catch (e) {
+      console.error('自動補完エラー:', e);
+      alert(`自動補完に失敗しました: ${e}`);
+    } finally {
+      setAutoLoading(prev => prev.map((v, i) => (i === index ? false : v)));
+    }
   };
 
   return (
@@ -157,7 +191,17 @@ function Config() {
           {bots.map((bot, index) => (
             <CardRoot key={index} width="100%" variant="outline">
               <CardHeader>
-                <Heading size="md">AI {index + 1}</Heading>
+                <HStack justify="space-between" align="center" width="100%">
+                  <Heading size="md">AI {index + 1}</Heading>
+                  <Button 
+                    size="xs" 
+                    variant="subtle"
+                    onClick={() => autoFillCard(index)}
+                    disabled={autoLoading[index]}
+                  >
+                    {autoLoading[index] ? '生成中...' : '自動補完'}
+                  </Button>
+                </HStack>
               </CardHeader>
               <CardBody>
                 <VStack gap={4}>
