@@ -11,6 +11,7 @@ DewAIは、ローカルのOllama AIモデルを使用したデスクトップチ
 - **モダンUI**: Chakra UI v3による美しいインターフェース
 - **カスタマイズ可能**: AI個性設定（名前、役割、説明）
 - **リアルタイム**: 即座のAI応答とチャット履歴
+- **安全な永続化**: SQLite にセッションと分析を保存（ローカルファイル）
 
 ## クイックスタート
 
@@ -27,7 +28,7 @@ DewAIは、ローカルのOllama AIモデルを使用したデスクトップチ
 # モデルのダウンロード
 ollama pull gemma3:4b
 
-# Ollamaサーバーの起動
+# Ollamaサーバーの起動（デフォルト: localhost:11434）
 ollama serve
 ```
 
@@ -53,8 +54,11 @@ npm run dev
 │                 │    │                 │    │                 │
 │ • Chakra UI v3  │◄──►│ • Rust Commands │◄──►│ • gemma3:4b     │
 │ • TypeScript    │    │ • HTTP Client   │    │ • localhost:11434│
-│ • Router        │    │ • JSON API      │    │ • Local Models  │
+│ • HashRouter    │    │ • JSON API      │    │ • Local Models  │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
+           ▲
+           │
+           └── SQLite (tauri-plugin-sql) にセッション/分析を永続化
 ```
 
 ## プロジェクト構造
@@ -62,23 +66,46 @@ npm run dev
 ```
 DewAI/
 ├── src/                      # Reactフロントエンド
-│   ├── components/           # UIコンポーネント
-│   │   ├── EnhancedChatAPP.tsx  # メインチャット画面
-│   │   └── ui/              # Chakra UIプロバイダー
-│   ├── hooks/               # カスタムフック
-│   │   └── useAIModel.tsx   # AI通信とモデル管理
-│   ├── pages/               # ページコンポーネント
-│   │   ├── home.tsx         # ホーム画面
-│   │   ├── config.tsx       # AI設定画面
-│   │   └── play.tsx         # チャット画面
-│   └── main.tsx             # アプリエントリーポイント
-├── src-tauri/               # Rustバックエンド
+│   ├── components/
+│   │   ├── EnhancedChatAPP.tsx   # 旧チャットUI（参考）
+│   │   └── ui/                   # Chakra UI プロバイダー/通知
+│   ├── hooks/
+│   │   └── useAIModel.tsx        # AI通信・モデル管理（Ollama）
+│   ├── pages/
+│   │   ├── start.tsx             # スタート（導線）
+│   │   ├── home.tsx              # ホーム
+│   │   ├── config.tsx            # AI設定（名前/役割/説明）
+│   │   ├── sessions.tsx          # セッション一覧/再開
+│   │   ├── database.tsx          # DB情報表示
+│   │   └── play.tsx              # メインチャット/分析パネル/参加者編集
+│   ├── utils/
+│   │   └── database.ts           # SQLite CRUD・スキーマ初期化
+│   └── main.tsx                  # エントリ（Provider + HashRouter）
+├── src-tauri/                   # Rustバックエンド
 │   ├── src/
-│   │   └── main.rs          # Tauriコマンドとオラマ通信
-│   ├── Cargo.toml           # Rust依存関係
-│   └── tauri.conf.json      # Tauri設定
-└── package.json             # Node.js依存関係
+│   │   ├── main.rs              # Tauriコマンド & Ollama連携
+│   │   ├── lib.rs
+│   │   └── prompts.rs
+│   ├── tauri.conf.json
+│   └── Cargo.toml
+├── docs/
+│   ├── storage.md               # SQLiteスキーマ/保存仕様
+│   └── troubleshooting.md       # トラブルシューティング
+└── package.json
 ```
+
+## データベースとセッション保存
+
+- データベース: SQLite（`@tauri-apps/plugin-sql`）
+- DBファイル: アプリローカル（例: `dewai.db`）
+- スキーマ: `sessions`, `session_analysis`, `session_meta`（必要インデックス/PRAGMA含む）
+- 振る舞い:
+  - セッションの作成/更新時に自動スキーマ初期化
+  - 参加者編集は `participants` JSON を更新
+  - 分析や要約は `session_analysis` に保存
+  - セッション削除で関連データを自動削除（FK ON DELETE CASCADE）
+
+詳細は `docs/storage.md` を参照してください。
 
 ## 開発コマンド
 
@@ -115,94 +142,75 @@ npm run dev:docker-build
 
 ### Windows
 ```batch
-# ビルドスクリプトを実行
 build-release.bat
 ```
 
 ### Linux/macOS
 ```bash
-# ビルドスクリプトを実行
 chmod +x build-release.sh
 ./build-release.sh
 ```
 
 ### 手動ビルド
 ```bash
-# 依存関係のインストール
 npm install
-
-# フロントエンドビルド
 npm run build
-
-# Tauriパッケージ作成
 npm run tauri build
 ```
 
 生成されたパッケージは `src-tauri/target/release/bundle/` に格納されます。
 
-## Docker開発環境
+## 画面ガイド
 
-### 前提条件
-- Docker
-- Docker Compose
-
-### 使用方法
-
-```bash
-# 開発環境コンテナを起動
-docker-compose up
-
-# コンテナ内でのコマンド実行
-docker exec -it dewai-development bash
-
-# コンテナ内でのアプリケーション起動
-npm run tauri dev
-```
-
-### 注意事項
-- GUIアプリケーションをDocker内で実行するには、X11フォワーディングなどの追加設定が必要な場合があります
-- モデルファイルは容量とライセンスの関係でコンテナには含まれていません
-- コンテナ内でOllamaとモデルを別途セットアップする必要があります
+- 設定（Config）: AIの「名前・役割・説明」を設定。ユーザー参加の有無も選択。
+- プレイ（Play）:
+  - 下部入力欄から発言（ユーザー参加ON時）。
+  - 右上「分析」ボタンで分析パネルを開閉（モバイルはオーバーレイ）。
+  - ヘッダーの「AI編集」で参加者編集ドロワーを開き、AIの追加/削除/編集が可能。
+  - 戻る操作時は保存完了を短時間待機するため、直近の発言が失われにくい。
+- セッション（Sessions）: 過去のセッション一覧と再開。
+- データベース（Database）: 保存状況の参考情報。
 
 ## 技術スタック
 
 ### フロントエンド
-- **React 18** - UIライブラリ
-- **TypeScript** - 型安全性
-- **Chakra UI v3** - コンポーネントライブラリ
-- **React Router** - ルーティング（HashRouter使用）
-- **Vite** - ビルドツール
+- **React 18**
+- **TypeScript**
+- **Chakra UI v3**（HashRouter, Provider 構成）
+- **React Router (HashRouter)**
+- **Vite**
 
 ### バックエンド
-- **Rust** - システムプログラミング言語
-- **Tauri** - デスクトップアプリフレームワーク
-- **reqwest** - HTTP クライアント
-- **tokio** - 非同期ランタイム
+- **Rust / Tauri**
+- **reqwest**（Ollama HTTP クライアント）
+- **tokio**
+- **@tauri-apps/plugin-sql (SQLite)** ← 追加
 
 ### AI統合
-- **Ollama** - ローカルLLMサーバー
-- **gemma3:4b** - デフォルトAIモデル
+- **Ollama**（localhost:11434）
+- **gemma3:4b**（デフォルトモデル）
 
 ## 使用方法
 
-1. **ホーム画面**: 「始める」ボタンでアプリを開始
-2. **設定画面**: AI の個性を設定（名前、役割、説明文）
-3. **チャット画面**: AI との対話を開始
+1. アプリ起動後、「新しく開始」するをクリックしAIの設定をする
+2. 「議論を開始する」をクリックで議論を開始
+3. 必要に応じて「分析」を開き、論点/立場/対立/共通認識を確認
+4. 参加者を変更する場合は「AI編集」から保存
+5. 「続きから開始する」で過去の議論を再開可能
 
 ## プライバシー
 
 - すべてのAI処理はローカルで実行
 - インターネット接続は不要（Ollamaモデル使用時）
-- チャット履歴はローカルに保存
+- チャット履歴はSQLiteにローカル保存
 - 外部サーバーにデータ送信なし
-
 
 ## 謝辞
 
-- [Tauri](https://tauri.app/) - 素晴らしいデスクトップアプリフレームワーク
-- [Ollama](https://ollama.ai/) - ローカルLLM実行環境
-- [Chakra UI](https://chakra-ui.com/) - 美しいReactコンポーネント
+- [Tauri](https://tauri.app/)
+- [Ollama](https://ollama.ai/)
+- [Chakra UI](https://chakra-ui.com/)
 
 ## 推奨IDE設定
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+- [VS Code](https://code.visualstudio.com/) + [Tauri 拡張](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
