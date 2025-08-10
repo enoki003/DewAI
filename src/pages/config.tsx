@@ -25,6 +25,7 @@ import {
   Badge,
 } from "@chakra-ui/react";
 import { useAIModel } from '../hooks/useAIModel';
+import { showGenericError } from '../components/ui/notifications';
 
 function Config() {
   const { selectedModel, changeModel, isModelLoaded, generateAIProfiles } = useAIModel();
@@ -78,7 +79,7 @@ function Config() {
       }
     } catch (e) {
       console.error('自動補完エラー:', e);
-      alert(`自動補完に失敗しました: ${e}`);
+      showGenericError('自動補完に失敗しました', `${e}`);
     } finally {
       setAutoLoading(prev => prev.map((v, i) => (i === index ? false : v)));
     }
