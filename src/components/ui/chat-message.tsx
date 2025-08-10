@@ -1,11 +1,4 @@
-import React from 'react';
-import { 
-  Box, 
-  VStack, 
-  HStack, 
-  Text, 
-  Avatar
-} from '@chakra-ui/react';
+import { Box, VStack, HStack, Text, Avatar } from '@chakra-ui/react';
 
 interface DiscussionMessage {
   speaker: string;
@@ -19,21 +12,19 @@ interface ChatMessageProps {
   index: number;
 }
 
-// 参加者名からランダムな色を生成
-const getAvatarColor = (name: string): string => {
-  const colors = [
-    'red', 'orange', 'yellow', 'green', 'teal', 
-    'blue', 'cyan', 'purple', 'pink', 'gray'
-  ];
-  
-  // 名前の文字コードの合計で色を決定（安定した色）
+// 参加者名から安定したカラー名を生成（chakraの基本パレット名）
+const baseColors = [
+  'red', 'orange', 'yellow', 'green', 'teal',
+  'blue', 'cyan', 'purple', 'pink', 'gray'
+] as const;
+const getAvatarBaseColor = (name: string): (typeof baseColors)[number] => {
   const sum = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  return colors[sum % colors.length];
+  return baseColors[sum % baseColors.length];
 };
 
-export const ChatMessage: React.FC<ChatMessageProps> = ({ message, index }) => {
-  const avatarColor = getAvatarColor(message.speaker);
-  
+export function ChatMessage({ message, index }: ChatMessageProps) {
+  const baseColor = getAvatarBaseColor(message.speaker);
+
   // 表示崩れ防止のための基本的なサニタイゼーション
   const sanitizedMessage = message.message
     .replace(/\t/g, '    ') // タブを4スペースに変換
@@ -47,13 +38,10 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, index }) => {
         gap={3}
         justify={message.isUser ? "flex-end" : "flex-start"}
       >
-        {/* AIメッセージの場合、左にアバター */}
+        {/* AIメッセージの場合、左にアバター（Chakra v3 API） */}
         {!message.isUser && (
           <VStack gap={1} align="center">
-            <Avatar.Root
-              size="sm"
-              colorPalette={avatarColor}
-            >
+            <Avatar.Root size="sm" colorPalette={baseColor}>
               <Avatar.Fallback name={message.speaker} />
             </Avatar.Root>
             <Text fontSize="xs" color="gray.600" textAlign="center" maxW="60px" lineClamp={1}>
@@ -64,7 +52,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, index }) => {
         
         {/* メッセージバブル */}
         {message.isUser ? (
-          // ユーザーメッセージ
+          // ユーザーメッセージ（以前の配色に準拠）
           <Box maxW="85%">
             <Box
               bg="green.solid"
@@ -79,7 +67,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, index }) => {
             >
               <Text fontSize="sm" lineHeight="1.4">{sanitizedMessage}</Text>
             </Box>
-            {/* タイムスタンプは通常フローで下に配置して余白を確保 */}
+            {/* タイムスタンプ */}
             <Text 
               fontSize="xs" 
               color="gray.400" 
@@ -94,7 +82,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, index }) => {
             </Text>
           </Box>
         ) : (
-          // AIメッセージ
+          // AIメッセージ（以前の配色に準拠）
           <Box maxW="70%">
             <Box
               p={3}
@@ -120,7 +108,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, index }) => {
             >
               <Text lineHeight="1.5">{sanitizedMessage}</Text>
             </Box>
-            {/* タイムスタンプは通常フローで下に配置 */}
+            {/* タイムスタンプ */}
             <Text 
               fontSize="xs" 
               color="gray.400" 
@@ -138,4 +126,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message, index }) => {
       </HStack>
     </VStack>
   );
-};
+}
+
+export default ChatMessage;

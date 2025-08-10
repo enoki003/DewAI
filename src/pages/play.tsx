@@ -89,6 +89,8 @@ const PlayPage: React.FC = () => {
   const [previousPage, setPreviousPage] = useState<string>('/start'); // 戻り先管理
   const [isWaitingForResume, setIsWaitingForResume] = useState(false); // セッション復元時のAIターン待機状態
   const [isSaving, setIsSaving] = useState(false); // セッション保存中フラグ
+  // 再開トーストの多重表示防止
+  const resumeHintShownRef = useRef(false);
   
   // 要約システム用の新しい状態
   const [summarizedHistory, setSummarizedHistory] = useState<string>(''); // 要約された過去の議論
@@ -249,7 +251,10 @@ const PlayPage: React.FC = () => {
               } else {
                 setDiscussionStarted(true);
                 console.log('✅ セッション復元: Ollama接続あり、議論状態を復元');
-                showSessionResumeHint();
+                if (!resumeHintShownRef.current) {
+                  showSessionResumeHint();
+                  resumeHintShownRef.current = true;
+                }
               }
 
               // 最近開いた更新
@@ -427,23 +432,31 @@ const PlayPage: React.FC = () => {
         timestamp: new Date()
       };
 
-      const updatedMessages = [...messages, userMessage];
-      setMessages(updatedMessages);
+      // 先にローカル状態を更新し、同じスナップショットで即時保存して永続化を確実にする
+      const nextMessages = [...messages, userMessage];
+      setMessages(nextMessages);
       setRecentMessages(prev => [...prev, userMessage]);
       setUserInput('');
       setCurrentTurn(1); // 次はAIのターン
       setTotalTurns(prev => prev + 1);
-      
+
       console.log('👤 ユーザー発言処理完了、自動保存実行前:', {
-        messageCount: updatedMessages.length,
+        messageCount: nextMessages.length,
         currentSessionId,
         isResumedSession
       });
-      
+
+      // ユーザー発言を即時に自動保存（更新 or 新規作成）。これにより再読み込み後も直前の発言が消えない
+      try {
+        await autoSaveSession(nextMessages);
+      } catch (e) {
+        console.warn('自動保存（ユーザー発言直後）に失敗:', e);
+      }
+
       
       // 要約チェックを実行
       await checkAndSummarize();
-
+ 
       // 定期的な議論分析
       await checkAndAnalyze();
       
@@ -836,13 +849,17 @@ const PlayPage: React.FC = () => {
         timestamp: new Date(),
       };
 
-      const updated = [...messages, aiMessage];
-      setMessages(updated);
+      let updatedForSave: DiscussionMessage[] = [];
+      setMessages(prev => {
+        const next = [...prev, aiMessage];
+        updatedForSave = next;
+        return next;
+      });
       setTotalTurns(prev => prev + 1);
 
       // セッション自動保存
       try {
-        await autoSaveSession(updated);
+        await autoSaveSession(updatedForSave);
       } catch (e) {
         console.warn('自動保存に失敗:', e);
       }
