@@ -31,9 +31,8 @@ import {
   showSessionResumeHint
 } from '../components/ui/notifications';
 import { ChatMessage } from '../components/ui/chat-message';
-import { saveSession, updateSession, getSessionById, updateSessionParticipants, saveSessionAnalysis } from '../utils/database';
+import { saveSession, updateSession, getSessionById, updateSessionParticipants, saveSessionAnalysis, updateSessionLastOpened } from '../utils/database';
 import { extractTopicsFromSummary } from "../utils/text";
-import { updateSessionLastOpened } from '../utils/database';
 
 // 参加者（AIプロファイル）
 interface BotProfile {
@@ -88,15 +87,18 @@ const PlayPage: React.FC = () => {
   
   // セッション管理
   const [sessionId, setSessionId] = useState<number | null>(null);
+  const sessionIdRef = useRef<number | null>(null); // 最新ID保持
+  useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
   const [isResumed, setIsResumed] = useState(false);
   const [backPath, setBackPath] = useState<string>('/start');
   const [awaitingAIResume, setAwaitingAIResume] = useState(false); // 復元直後にAIの続き待ちか
   const [isSavingSession, setIsSavingSession] = useState(false);
   const resumeHintShownRef = useRef(false);
+  const pendingMessagesRef = useRef<TalkMessage[] | null>(null); // 保存キュー
   
   // 要約/分析のための保持
   const [historySummary, setHistorySummary] = useState<string>(''); // 累積要約
-  const [, setRecentWindow] = useState<TalkMessage[]>([]); // 直近期（UIで未使用、将来用）
+  const [, setRecentWindow] = useState<TalkMessage[]>([]); // 直近期
   const [turnCount, setTurnCount] = useState(0);
   const [activeTopics, setActiveTopics] = useState<string[]>([]);
   const [summarizing, setSummarizing] = useState(false);
@@ -108,10 +110,90 @@ const PlayPage: React.FC = () => {
   
   // 参加者編集
   const [editorOpen, setEditorOpen] = useState(false);
-  // JSX で参照しているが型チェックの誤検出を避けるため明示的に読み取り
   const [editingBots, setEditingBots] = useState<BotProfile[]>([]);
   const [includeUser, setIncludeUser] = useState<boolean>(false);
   const [editTab, setEditTab] = useState<string>('ai-0');
+
+  // 参加者編集ハンドラ群
+  const openEditor = () => {
+    if (!config) return;
+    // 現在の設定を編集用にコピー
+    setEditingBots(config.aiData.map((b) => ({ ...b })));
+    setIncludeUser(!!config.participate);
+    setEditTab('ai-0');
+    setEditorOpen(true);
+  };
+
+  const addBot = () => {
+    setEditingBots((prev) => {
+      const next = [...prev, { name: `AI ${prev.length + 1}`, role: '参加者', description: '' }];
+      // 新規タブへ移動
+      setEditTab(`ai-${next.length - 1}`);
+      return next;
+    });
+  };
+
+  const removeBot = (idx: number) => {
+    setEditingBots((prev) => {
+      if (prev.length <= 1) return prev; // 最低1名は必須
+      const next = prev.filter((_, i) => i !== idx);
+      // タブ選択調整
+      const newIndex = Math.min(idx, next.length - 1);
+      setEditTab(`ai-${newIndex}`);
+      return next;
+    });
+  };
+
+  const updateBotField = (idx: number, field: keyof BotProfile, value: string) => {
+    setEditingBots((prev) => prev.map((b, i) => (i === idx ? { ...b, [field]: value } : b)));
+  };
+
+  const saveBotEdits = async () => {
+    if (!config) return;
+    try {
+      // 入力検証
+      if (editingBots.some((b) => !b.name || !b.name.trim())) {
+        showParticipantsUpdateError('AI名を入力してください');
+        return;
+      }
+      const aiData = editingBots.map((b) => ({
+        name: b.name.trim(),
+        role: (b.role || '').trim(),
+        description: (b.description || '').trim(),
+      }));
+
+      // 設定更新
+      setConfig((prev) => (prev ? { ...prev, aiData, participate: includeUser } : prev));
+
+      // DBへparticipantsを反映
+      if (sessionIdRef.current && sessionIdRef.current > 0) {
+        try {
+          await updateSessionParticipants(
+            sessionIdRef.current,
+            JSON.stringify({ userParticipates: includeUser, aiData })
+          );
+        } catch (e) {
+          console.warn('[participants] DB更新失敗:', e);
+        }
+      }
+
+      // ターン整合（AI数が減った場合のはみ出しを防止）
+      setTurnIndex((prev) => {
+        if (prev === 0) return includeUser ? 0 : aiData.length > 0 ? 1 : 0;
+        const aiIdx = prev - 1;
+        if (aiIdx >= aiData.length) {
+          return includeUser ? 0 : aiData.length > 0 ? 1 : 0;
+        }
+        return prev;
+      });
+
+      showParticipantsUpdateSuccess();
+      setEditorOpen(false);
+    } catch (e) {
+      console.error('[participants] 更新失敗:', e);
+      showParticipantsUpdateError(`${e}`);
+    }
+  };
   
   // スクロール制御
   const messageListRef = useRef<HTMLDivElement>(null);
@@ -121,7 +203,7 @@ const PlayPage: React.FC = () => {
   const autoScrollRef = useRef(true);
   const userScrollingRef = useRef(false);
 
-  // 末尾にスクロール（依存なし・refで判定）
+  // 末尾にスクロール
   const scrollToBottom = useCallback(() => {
     const el = messageListRef.current;
     if (!el) return;
@@ -146,7 +228,7 @@ const PlayPage: React.FC = () => {
     }, 150);
   }, []);
 
-  // メッセージ更新時に自動スクロール
+  // メッセージ更新時スクロール
   useEffect(() => {
     if (messages.length > 0) {
       const id = window.setTimeout(() => scrollToBottom(), 100);
@@ -171,29 +253,16 @@ const PlayPage: React.FC = () => {
 
               // セッション状態
               setSessionId(parsed.sessionId);
+              sessionIdRef.current = parsed.sessionId;
               setIsResumed(true);
 
-              // 参加者復元（新形式優先、旧形式フォールバック）
-              let bots: BotProfile[] = [];
-              let userParticipates = false;
-              try {
-                const participants = JSON.parse(session.participants);
-                if (participants.aiData && Array.isArray(participants.aiData)) {
-                  bots = participants.aiData;
-                  userParticipates = !!participants.userParticipates;
-                } else {
-                  throw new Error('legacy participants');
-                }
-              } catch {
-                const names = JSON.parse(session.participants);
-                userParticipates = names.includes('ユーザー');
-                bots = names.filter((n: string) => n !== 'ユーザー').map((name: string) => ({
-                  name,
-                  role: '復元',
-                  description: ''
-                }));
+              // 参加者復元（新形式のみ）
+              const participantsObj = JSON.parse(session.participants);
+              if (!participantsObj || !Array.isArray(participantsObj.aiData)) {
+                throw new Error('participantsフォーマットが不正です');
               }
-
+              const bots: BotProfile[] = participantsObj.aiData;
+              const userParticipates = !!participantsObj.userParticipates;
               setConfig({ discussionTopic: session.topic, aiData: bots, participate: userParticipates });
 
               // 使用モデル復元
@@ -275,8 +344,8 @@ const PlayPage: React.FC = () => {
     }
   }, []);
 
-  // 参加者（ユーザーを先頭に付与）
-  const participants = config ? [
+  // 表示用参加者（ユーザーを先頭に付与）
+  const displayParticipants = config ? [
     ...(config.participate ? [{ name: 'あなた', role: 'あなた', description: '議論の参加者' }] : []),
     ...config.aiData
   ] : [];
@@ -289,6 +358,7 @@ const PlayPage: React.FC = () => {
     // 新規時はセッションIDをリセット
     if (!isResumed) {
       setSessionId(null);
+      sessionIdRef.current = null;
       setIsResumed(false);
     }
 
@@ -419,19 +489,24 @@ const PlayPage: React.FC = () => {
     }
   };
 
-  // サイレント保存
+  // サイレント保存（保存中は最新スナップショットをキューに入れて完了後に再保存）
   const autoSaveSession = async (messagesToSave?: TalkMessage[]) => {
-    if (isSavingSession) { console.log('[save] 多重保存スキップ'); return; }
     const current = messagesToSave || messages;
     if (!config || current.length === 0) { console.log('[save] 保存対象なし'); return; }
+
+    if (isSavingSession) {
+      pendingMessagesRef.current = current;
+      console.log('[save] 保存中→最新スナップショットをキューに登録');
+      return;
+    }
 
     setIsSavingSession(true);
     try {
       const participantsData = { userParticipates: config.participate, aiData: config.aiData };
-      if (sessionId && sessionId > 0) {
-        await updateSession(sessionId, JSON.stringify(current));
+      const currentId = sessionIdRef.current;
+      if (currentId && currentId > 0) {
+        await updateSession(currentId, JSON.stringify(current));
       } else {
-        if (current.length === 0) return;
         const newId = await saveSession(
           config.discussionTopic,
           JSON.stringify(participantsData),
@@ -439,69 +514,19 @@ const PlayPage: React.FC = () => {
           selectedModel
         );
         setSessionId(newId);
+        sessionIdRef.current = newId;
         setIsResumed(true);
       }
     } catch (e) {
       console.error('[save] 失敗:', e);
     } finally {
       setIsSavingSession(false);
-    }
-  };
-
-  // 参加者編集（Drawer）
-  const openEditor = () => {
-    if (!config) return;
-    setEditingBots([...config.aiData]);
-    setIncludeUser(!!config.participate);
-    setEditTab('ai-0');
-    setEditorOpen(true);
-  };
-
-  const addBot = () => {
-    setEditingBots(prev => {
-      if (prev.some(b => !b.name?.trim())) {
-        showGenericError('AIの追加ができません', '未入力のAI名があります。先に入力してください。');
-        return prev;
+      if (pendingMessagesRef.current) {
+        const pending = pendingMessagesRef.current;
+        pendingMessagesRef.current = null;
+        await autoSaveSession(pending);
       }
-      const next = [...prev, { name: '', role: '', description: '' }];
-      setEditTab(`ai-${next.length - 1}`);
-      return next;
-    });
-  };
-
-  const removeBot = (index: number) => {
-    setEditingBots(prev => {
-      const next = prev.filter((_, i) => i !== index);
-      const newIndex = Math.max(0, Math.min(index, next.length - 1));
-      setEditTab(`ai-${newIndex}`);
-      return next;
-    });
-  };
-
-  const saveBotEdits = async () => {
-    if (!config) return;
-    if (editingBots.some(b => !b.name?.trim())) { showGenericError('AI編集の保存に失敗', '各AIの「名前」は必須です。'); return; }
-    const updated: ScreenConfig = { ...config, aiData: editingBots, participate: includeUser };
-    setConfig(updated);
-    localStorage.setItem('aiConfig', JSON.stringify(updated));
-
-    try {
-      if (sessionId && sessionId > 0) {
-        const participantsData = { userParticipates: updated.participate, aiData: updated.aiData };
-        await updateSessionParticipants(sessionId, JSON.stringify(participantsData));
-        showParticipantsUpdateSuccess();
-      }
-    } catch (e) {
-      console.error('[participants] 更新失敗:', e);
-      showParticipantsUpdateError(`${e}`);
     }
-    setEditorOpen(false);
-  };
-
-  const updateBotField = (index: number, field: keyof BotProfile, value: string) => {
-    const updated = [...editingBots];
-    updated[index] = { ...updated[index], [field]: value } as BotProfile;
-    setEditingBots(updated);
   };
 
   // AIターン
@@ -526,8 +551,8 @@ const PlayPage: React.FC = () => {
 
       const aiMsg: TalkMessage = { speaker: bot.name, message: response, isUser: false, timestamp: new Date() };
 
-      let snapshot: TalkMessage[] = [];
-      setMessages(prev => { const next = [...prev, aiMsg]; snapshot = next; return next; });
+      const snapshot = [...messages, aiMsg];
+      setMessages(snapshot);
       setTurnCount(prev => prev + 1);
 
       try { await autoSaveSession(snapshot); } catch (e) { console.warn('[save] 自動保存失敗:', e); }
@@ -543,6 +568,22 @@ const PlayPage: React.FC = () => {
       showAIResponseError(bot?.name || 'AI', `${e}`);
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  // 戻る前に短時間保存を待機
+  const handleBack = async () => {
+    try {
+      await autoSaveSession(messages);
+      const start = Date.now();
+      while (isSavingSession || pendingMessagesRef.current) {
+        await new Promise((r) => setTimeout(r, 100));
+        if (Date.now() - start > 2000) break; // 最大2秒待機
+      }
+    } catch (e) {
+      console.warn('[back] 保存待機中にエラー:', e);
+    } finally {
+      navigate(backPath);
     }
   };
 
@@ -574,7 +615,7 @@ const PlayPage: React.FC = () => {
             width="100%"
             gap={{ base: 2, md: 0 }}
           >
-            <Button onClick={() => navigate(backPath)} size={{ base: "xs", md: "sm" }} variant="ghost">
+            <Button onClick={handleBack} size={{ base: "xs", md: "sm" }} variant="ghost">
               ← 戻る
             </Button>
             <Text 
@@ -608,7 +649,7 @@ const PlayPage: React.FC = () => {
           width="100%"
         >
           <HStack wrap="wrap" gap={2} flex="1">
-            {participants.map((p, index) => (
+            {displayParticipants.map((p, index) => (
               <Badge
                 key={index}
                 colorPalette={turnIndex === index ? "green" : "gray"}
@@ -675,7 +716,7 @@ const PlayPage: React.FC = () => {
         {!isActive && (
           <VStack gap={4} flex={1} justify="center" p={{ base: 4, md: 0 }}>
             <Text fontSize={{ base: "md", md: "lg" }}>議論の準備ができました</Text>
-            <Text fontSize={{ base: "sm", md: "md" }}>参加者: {participants.length}人</Text>
+            <Text fontSize={{ base: "sm", md: "md" }}>参加者: {displayParticipants.length}人</Text>
             <VStack gap={2}>
               <Text fontSize={{ base: "xs", md: "sm" }} color="fg.muted" textAlign="center">💬 {config.participate ? '下部の入力エリアから議論を開始できます' : '下部のボタンから自動議論を開始できます'}</Text>
               <Text fontSize={{ base: "xs", md: "sm" }} color="fg.muted" textAlign="center">🎯 テーマ: {config.discussionTopic}</Text>
@@ -980,7 +1021,7 @@ const PlayPage: React.FC = () => {
                 <Button colorPalette="green" onClick={startSession} disabled={!isModelLoaded || isGenerating || isSavingSession} flex="1" size={{ base: "sm", md: "md" }}>{!isModelLoaded ? 'Ollamaが起動していません' : isSavingSession ? '保存中...' : isGenerating ? '処理中...' : '議論を開始する'}</Button>
               ) : (
                 <Button colorPalette="green" onClick={awaitingAIResume && turnIndex > 0 ? continueAIResponse : handleSubmit} disabled={awaitingAIResume && turnIndex > 0 ? false : (!inputText.trim() || !isModelLoaded || turnIndex !== 0 || isGenerating || isSavingSession)} flex="1" size={{ base: "sm", md: "md" }}>
-                  {!isModelLoaded ? 'Ollamaが起動していません' : awaitingAIResume && turnIndex > 0 ? '応答を再開する' : turnIndex !== 0 ? 'AIのターンです' : isSavingSession ? '保存中...' : isGenerating ? '処理中...' : '発言する'}
+                  {!isModelLoaded ? 'Ollamaが起動していません' : awaitingAIResume && turnIndex > 0 ? '応答を再開する' : turnIndex !== 0 ? 'AIのターンです' : isSavingSession ? '保存中...' : '発言する'}
                 </Button>
               )}
               {isActive && !config.participate && !isGenerating && (

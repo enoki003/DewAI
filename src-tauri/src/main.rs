@@ -216,18 +216,11 @@ async fn generate_text(prompt: String) -> Result<String, String> {
     println!("generate_text 呼び出し: prompt = {}", mask_prompt_for_log(&prompt));
     println!("プロンプト長: {}文字", prompt.len());
 
-    // 設定からモデル名を取得（デフォルト: gemma3:4b）
-    let model_name = get_selected_model().await;
+    // デフォルトは gemma3:4b を使用（フロントからは generate_text_with_model を推奨）
+    let model_name = "gemma3:4b".to_string();
     println!("使用モデル: {}", model_name);
 
     call_ollama_generate(&model_name, &prompt).await
-}
-
-// 現在選択されているモデルを取得
-async fn get_selected_model() -> String {
-    // とりあえずlocalStorageから読み取る機能はないので、デフォルトを返す
-    // フロントエンド側でモデル設定を管理
-    "gemma3:4b".to_string()
 }
 
 // 利用可能なモデル一覧を取得
