@@ -196,17 +196,6 @@ npm run tauri dev
 - チャット履歴はローカルに保存
 - 外部サーバーにデータ送信なし
 
-## コントリビューション
-
-1. このリポジトリをフォーク
-2. 機能ブランチを作成 (`git checkout -b feature/amazing-feature`)
-3. 変更をコミット (`git commit -m 'Add amazing feature'`)
-4. ブランチにプッシュ (`git push origin feature/amazing-feature`)
-5. プルリクエストを作成
-
-## ライセンス
-
-This project is licensed under the ISC License.
 
 ## 謝辞
 

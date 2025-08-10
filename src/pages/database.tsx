@@ -20,7 +20,7 @@ export default function DatabasePage() {
   const loadStats = async () => {
     try {
       setLoading(true);
-      // ローカルストレージから統計を計算
+      // SQLite から統計を計算
       const sessions = await getAllSessions();
       const now = new Date();
       const sevenDaysAgo = new Date();
@@ -94,7 +94,7 @@ export default function DatabasePage() {
                   
                   <Box pt={4} borderTop="1px solid" borderColor="border.muted">
                     <Text fontSize="sm" color="fg.muted">
-                      💡 データストレージ: ローカルストレージ
+                      💡 データストレージ: SQLite（ローカルファイル dewai.db）
                     </Text>
                   </Box>
                 </VStack>

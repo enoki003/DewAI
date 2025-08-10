@@ -20,10 +20,57 @@ export interface SessionAnalysisRow {
 
 let db: Database | null = null;
 let metaInitialized = false;
+// 追加: 全体スキーマ初期化フラグ
+let schemaInitialized = false;
 
 function getDb(): Database {
   if (!db) db = Database.get('sqlite:dewai.db');
   return db;
+}
+
+// 追加: スキーマ初期化（PRAGMA/テーブル/インデックス）
+async function ensureSchema() {
+  if (schemaInitialized) return;
+  const conn = getDb();
+
+  // PRAGMA 設定
+  await conn.execute('PRAGMA foreign_keys = ON');
+  await conn.execute('PRAGMA journal_mode = WAL');
+
+  // メインテーブル
+  await conn.execute(
+    'CREATE TABLE IF NOT EXISTS sessions (\
+      id INTEGER PRIMARY KEY,\
+      topic TEXT NOT NULL,\
+      participants TEXT NOT NULL,\
+      messages TEXT NOT NULL,\
+      model TEXT NOT NULL,\
+      created_at TEXT NOT NULL,\
+      updated_at TEXT NOT NULL\
+    )'
+  );
+
+  // 解析結果テーブル（外部キー付き）
+  await conn.execute(
+    'CREATE TABLE IF NOT EXISTS session_analysis (\
+      id INTEGER PRIMARY KEY,\
+      session_id INTEGER NOT NULL,\
+      kind TEXT NOT NULL,\
+      payload TEXT NOT NULL,\
+      created_at TEXT NOT NULL,\
+      FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE\
+    )'
+  );
+
+  // メタテーブル（既存ロジック維持）
+  await ensureSessionMetaTable();
+
+  // インデックス
+  await conn.execute('CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at)');
+  await conn.execute('CREATE INDEX IF NOT EXISTS idx_session_meta_last_opened ON session_meta(last_opened_at)');
+  await conn.execute('CREATE INDEX IF NOT EXISTS idx_session_analysis_session_created ON session_analysis(session_id, created_at)');
+
+  schemaInitialized = true;
 }
 
 async function ensureSessionMetaTable() {
@@ -38,7 +85,7 @@ async function ensureSessionMetaTable() {
 
 // セッションの「最終オープン時刻」を更新（存在しなければ作成）
 export async function updateSessionLastOpened(sessionId: number): Promise<void> {
-  await ensureSessionMetaTable();
+  await ensureSchema();
   const conn = getDb();
   const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
   await conn.execute(
@@ -54,6 +101,7 @@ export async function saveSession(
   messages: string,
   model: string = 'gemma3:4b'
 ): Promise<number> {
+  await ensureSchema();
   const conn = getDb();
   const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
   const result = await conn.execute(
@@ -71,6 +119,7 @@ export async function saveSession(
 
 // メッセージ更新
 export async function updateSession(sessionId: number, messages: string): Promise<void> {
+  await ensureSchema();
   const conn = getDb();
   const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
   await conn.execute(
@@ -81,6 +130,7 @@ export async function updateSession(sessionId: number, messages: string): Promis
 
 // 参加者情報更新
 export async function updateSessionParticipants(sessionId: number, participants: string): Promise<void> {
+  await ensureSchema();
   const conn = getDb();
   const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
   await conn.execute(
@@ -91,7 +141,7 @@ export async function updateSessionParticipants(sessionId: number, participants:
 
 // 全セッション取得（最近開いた順 → なければ更新日時降順）
 export async function getAllSessions(): Promise<SavedSession[]> {
-  await ensureSessionMetaTable();
+  await ensureSchema();
   const conn = getDb();
   const rows = await conn.select<SavedSession[]>(
     'SELECT s.id, s.topic, s.participants, s.messages, s.model, s.created_at, s.updated_at \
@@ -104,6 +154,7 @@ export async function getAllSessions(): Promise<SavedSession[]> {
 
 // ID指定取得
 export async function getSessionById(sessionId: number): Promise<SavedSession | null> {
+  await ensureSchema();
   const conn = getDb();
   const rows = await conn.select<SavedSession[]>(
     'SELECT id, topic, participants, messages, model, created_at, updated_at FROM sessions WHERE id = $1',
@@ -112,12 +163,14 @@ export async function getSessionById(sessionId: number): Promise<SavedSession | 
   return rows?.[0] ?? null;
 }
 
-// 削除
+// 削除（関連データも含めて整合性維持）
 export async function deleteSession(sessionId: number): Promise<void> {
+  await ensureSchema();
   const conn = getDb();
-  await conn.execute('DELETE FROM sessions WHERE id = $1', [sessionId]);
-  await ensureSessionMetaTable();
+  // 念のため明示的に子テーブルとメタを削除（外部キーON/CASCADEでも冪等）
+  await conn.execute('DELETE FROM session_analysis WHERE session_id = $1', [sessionId]);
   await conn.execute('DELETE FROM session_meta WHERE session_id = $1', [sessionId]);
+  await conn.execute('DELETE FROM sessions WHERE id = $1', [sessionId]);
 }
 
 // DBクローズ
@@ -132,6 +185,7 @@ export async function saveSessionAnalysis(
   kind: string,
   payload: string
 ): Promise<number> {
+  await ensureSchema();
   const conn = getDb();
   const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
   const result = await conn.execute(
@@ -147,6 +201,7 @@ export async function getSessionAnalysis(
   kind?: string,
   limit: number = 10
 ): Promise<SessionAnalysisRow[]> {
+  await ensureSchema();
   const conn = getDb();
   if (kind) {
     const rows = await conn.select<SessionAnalysisRow[]>(

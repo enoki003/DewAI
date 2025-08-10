@@ -1,18 +1,29 @@
 # DewAI ストレージ仕様
 
-本書はセッション保存/復元と将来のDB移行方針を記す。
+本書はセッション保存/復元とDB仕様を記す。
 
 ## 1. 目的
 - セッションを安全かつ再現性高く保持
 - 参加者編集/モデル変更の追従
 
-## 2. 現状の実装
-- 保存先: localStorage + アプリ内ユーティリティ（`src/utils/database.ts`）
-- 主キー/索引: localStorage 管理（`currentSessionInfo`）
+## 2. 現状の実装（SQLite）
+- 保存先: SQLite (`@tauri-apps/plugin-sql`) ローカルファイル `dewai.db`
+- 初期化: アプリ実行中に `src/utils/database.ts` の ensureSchema() が PRAGMA/テーブル/インデックスを作成
 
-### 2.1 データ構造
-- `sessions` レコード相当: { id, topic, participants, messages, model, created_at, updated_at }
-- participants: JSON 文字列（新フォーマット）
+### 2.1 スキーマ
+- sessions: { id INTEGER PK, topic TEXT, participants TEXT(JSON), messages TEXT(JSON), model TEXT, created_at TEXT, updated_at TEXT }
+- session_analysis: { id INTEGER PK, session_id INTEGER FK -> sessions(id) ON DELETE CASCADE, kind TEXT, payload TEXT, created_at TEXT }
+- session_meta: { session_id INTEGER PK, last_opened_at TEXT }
+
+PRAGMA: foreign_keys=ON, journal_mode=WAL
+
+索引:
+- idx_sessions_updated_at(updated_at)
+- idx_session_meta_last_opened(last_opened_at)
+- idx_session_analysis_session_created(session_id, created_at)
+
+### 2.2 データ構造例
+- participants(JSON)
 ```
 {
   "userParticipates": boolean,
@@ -21,25 +32,17 @@
   ]
 }
 ```
-- messages: JSON 文字列
+- messages(JSON)
 ```
 [
   { "speaker": string, "message": string, "isUser": boolean, "timestamp": string }
 ]
 ```
-- `aiConfig`（現在の設定）: { discussionTopic, aiData[], participate }
-- `currentSessionInfo`: { sessionId, topic, timestamp }
 
-### 2.2 ポリシー
+## 3. ポリシー
 - 同一トピックは継続上書き（新規保存は最初の1回のみ）
-- `/play` 右上のAI編集は、アクティブなセッション参加者にも反映
-
-## 3. 将来のSQLite移行
-- ライブラリ: `@tauri-apps/plugin-sql`（既に依存追加済）
-- 推奨スキーマ: `sessions`（id, topic, participants(json), messages(json), model, created_at, updated_at）
-- マイグレーション: 既存 localStorage から初回起動時に移行
-- 利点: 大容量/検索/ソート/バックアップ容易
+- `/play` のAI編集は、アクティブセッション参加者にも反映
 
 ## 4. エクスポート/インポート（将来）
-- JSON エクスポート: 単一セッション/全セッション
+- JSONエクスポート: 単一/全セッション
 - インポート: 互換チェック＋マージ
