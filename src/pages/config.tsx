@@ -28,35 +28,26 @@ import { useAIModel } from '../hooks/useAIModel';
 
 function Config() {
   const { selectedModel, changeModel, isModelLoaded } = useAIModel();
-  const [numAI, setNumAI] = React.useState(1);
+  const [botCount, setBotCount] = React.useState(1);
   const [showFields, setShowFields] = React.useState(false);
   const [participate, setParticipate] = React.useState(true);
   const [discussionTopic, setDiscussionTopic] = React.useState('');
 
   const navigate = useNavigate();
 
-  interface AIData {
+  interface BotProfile {
     name: string;
     role: string;
     description: string;
   }
 
-  const [aiData, setAiData] = React.useState<AIData[]>([]);
-
-  React.useEffect(() => {
-    console.log("現在のaiData:", aiData);
-  }, [aiData]);
-  React.useEffect(() => {
-    console.log("現在のnumAI:", numAI);
-  }, [numAI]);
+  const [bots, setBots] = React.useState<BotProfile[]>([]);
 
   const handleSubmit = () => {
-    const validNumAI = isNaN(numAI) || numAI === undefined ? 1 : numAI; // defaults to 1
-    const count = Math.min(Math.max(validNumAI, 1), 10);
-    setAiData(Array.from({ length: count }, () => ({ name: "", role: "", description: "" })));
+    const validCount = isNaN(botCount) || botCount === undefined ? 1 : botCount;
+    const count = Math.min(Math.max(validCount, 1), 10);
+    setBots(Array.from({ length: count }, () => ({ name: "", role: "", description: "" })));
     setShowFields(true);
-    console.log("handleSubmit called, count:", count, "aiData:", aiData);
-    console.log("handleSubmit called", count, aiData, showFields);
   };
 
   return (
@@ -75,7 +66,7 @@ function Config() {
         <Heading size="2xl">議論の設定</Heading>
         <Text color="fg.muted">シチュエーション、テーマ、役職を決定します</Text>
         
-        {/* Ollama接続状態表示 */}
+        {/* 接続状態 */}
         <HStack justify="center" align="center" gap={2}>
           <Text fontSize="sm" color="fg.muted">Ollama状態:</Text>
           <Badge 
@@ -135,10 +126,10 @@ function Config() {
           <FieldLabel>何人のAIと議論しますか？</FieldLabel>
           <HStack gap={4}>
             <NumberInputRoot
-              value={String(numAI)}
+              value={String(botCount)}
               onValueChange={(valueObj) => {
                 const newValue = valueObj.value;
-                setNumAI(newValue ? Number(newValue) : 1);
+                setBotCount(newValue ? Number(newValue) : 1);
               }}
               min={1}
               max={5}
@@ -163,7 +154,7 @@ function Config() {
 
       {showFields && (
         <VStack gap={6} width="100%" maxW="2xl">
-          {aiData.map((ai, index) => (
+          {bots.map((bot, index) => (
             <CardRoot key={index} width="100%" variant="outline">
               <CardHeader>
                 <Heading size="md">AI {index + 1}</Heading>
@@ -173,11 +164,11 @@ function Config() {
                   <FieldRoot>
                     <FieldLabel>名前</FieldLabel>
                     <Input
-                      value={ai.name}
+                      value={bot.name}
                       onChange={(e) => {
-                        const newAiData = [...aiData];
-                        newAiData[index].name = e.target.value;
-                        setAiData(newAiData);
+                        const next = [...bots];
+                        next[index].name = e.target.value;
+                        setBots(next);
                       }}
                       placeholder="例: 田中太郎"
                     />
@@ -185,11 +176,11 @@ function Config() {
                   <FieldRoot>
                     <FieldLabel>役職</FieldLabel>
                     <Input
-                      value={ai.role}
+                      value={bot.role}
                       onChange={(e) => {
-                        const newAiData = [...aiData];
-                        newAiData[index].role = e.target.value;
-                        setAiData(newAiData);
+                        const next = [...bots];
+                        next[index].role = e.target.value;
+                        setBots(next);
                       }}
                       placeholder="例: 環境政策専門家"
                     />
@@ -197,11 +188,11 @@ function Config() {
                   <FieldRoot>
                     <FieldLabel>説明</FieldLabel>
                     <Textarea
-                      value={ai.description}
+                      value={bot.description}
                       onChange={(e) => {
-                        const newAiData = [...aiData];
-                        newAiData[index].description = e.target.value;
-                        setAiData(newAiData);
+                        const next = [...bots];
+                        next[index].description = e.target.value;
+                        setBots(next);
                       }}
                       rows={3}
                       placeholder="例: 20年以上環境問題に携わり、持続可能な開発に詳しい専門家。データに基づいた現実的な提案を重視する。"
@@ -238,8 +229,8 @@ function Config() {
               return;
             }
             
-            const validAiData = aiData.filter(ai => ai.name && ai.role && ai.description);
-            if (validAiData.length === 0) {
+            const validBots = bots.filter(b => b.name && b.role && b.description);
+            if (validBots.length === 0) {
               alert('最低1人のAIの設定を完了してください');
               return;
             }
@@ -250,7 +241,7 @@ function Config() {
             }
             
             localStorage.setItem('aiConfig', JSON.stringify({
-              aiData: validAiData,
+              aiData: validBots, // 永続フォーマットは aiData を維持
               participate: participate,
               discussionTopic: discussionTopic.trim()
             }));

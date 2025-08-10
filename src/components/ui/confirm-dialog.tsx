@@ -1,18 +1,20 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Button,
   Dialog,
   Portal,
-  HStack
+  HStack,
+  Text
 } from '@chakra-ui/react';
 
 interface ConfirmDialogProps {
   trigger: React.ReactElement;
   title: string;
-  message: string;
+  message: React.ReactNode; // テキスト以外も許容
   confirmText?: string;
   cancelText?: string;
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
+  onCancel?: () => void;
   variant?: 'destructive' | 'default';
 }
 
@@ -23,10 +25,31 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   confirmText = '確認',
   cancelText = 'キャンセル',
   onConfirm,
-  variant = 'default'
+  onCancel,
+  variant = 'default',
 }) => {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const handleConfirm = async () => {
+    try {
+      setLoading(true);
+      await onConfirm();
+      setOpen(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCancel = () => {
+    onCancel?.();
+    setOpen(false);
+  };
+
+  const confirmPalette = variant === 'destructive' ? 'red' : 'green';
+
   return (
-    <Dialog.Root>
+    <Dialog.Root open={open} onOpenChange={(d) => setOpen(d.open)}>
       <Dialog.Trigger asChild>
         {trigger}
       </Dialog.Trigger>
@@ -38,23 +61,16 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
               <Dialog.Title>{title}</Dialog.Title>
             </Dialog.Header>
             <Dialog.Body>
-              {message}
+              {typeof message === 'string' ? <Text>{message}</Text> : message}
             </Dialog.Body>
             <Dialog.Footer>
               <HStack gap={3}>
-                <Dialog.ActionTrigger asChild>
-                  <Button variant="outline">
-                    {cancelText}
-                  </Button>
-                </Dialog.ActionTrigger>
-                <Dialog.ActionTrigger asChild>
-                  <Button
-                    colorPalette={variant === 'destructive' ? 'red' : 'green'}
-                    onClick={onConfirm}
-                  >
-                    {confirmText}
-                  </Button>
-                </Dialog.ActionTrigger>
+                <Button variant="outline" onClick={handleCancel} disabled={loading}>
+                  {cancelText}
+                </Button>
+                <Button colorPalette={confirmPalette} onClick={handleConfirm} loading={loading}>
+                  {confirmText}
+                </Button>
               </HStack>
             </Dialog.Footer>
           </Dialog.Content>

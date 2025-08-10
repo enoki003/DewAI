@@ -1,12 +1,7 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 
-export interface AIModel {
-  name: string;
-  displayName: string;
-}
-
-// 許可モデルのプレフィックス（バックエンドと整合）
+// 許可するモデル（バックエンドと整合）
 const ALLOWED_PREFIXES = ['gemma3:1b', 'gemma3:4b'];
 const isAllowedModel = (m: string) => ALLOWED_PREFIXES.some(p => m?.startsWith(p));
 
@@ -15,7 +10,7 @@ export const useAIModel = () => {
   const [selectedModel, setSelectedModel] = useState<string>('gemma3:4b');
   const [availableModels, setAvailableModels] = useState<string[]>([]);
 
-  // モデル状態をチェック
+  // モデル状態チェック
   const checkModelStatus = async (): Promise<boolean> => {
     try {
       const result = await invoke<boolean>('is_model_loaded');
@@ -28,50 +23,37 @@ export const useAIModel = () => {
     }
   };
 
-  // 利用可能なモデル一覧を取得
+  // 利用可能なモデル一覧
   const loadAvailableModels = async () => {
     try {
       const models = await invoke<string[]>('get_available_models');
       setAvailableModels(models);
-      console.log('利用可能なモデル:', models);
     } catch (error) {
       console.error('モデル一覧取得エラー:', error);
-      // エラーの場合はデフォルトモデルを設定
       setAvailableModels(['gemma3:4b', 'gemma3:1b']);
     }
   };
 
-  // 初期化時にモデル状態と利用可能モデルをチェック
+  // 初期化
   useEffect(() => {
     checkModelStatus();
     loadAvailableModels();
-    
-    // localStorageから前回選択したモデルを復元（許可モデルのみ）
     const savedModel = localStorage.getItem('selectedModel');
-    if (savedModel && isAllowedModel(savedModel)) {
-      setSelectedModel(savedModel);
-    }
+    if (savedModel && isAllowedModel(savedModel)) setSelectedModel(savedModel);
   }, []);
 
-  // モデル変更時にlocalStorageに保存（許可モデルのみ）
+  // モデル変更
   const changeModel = (model: string) => {
     const next = isAllowedModel(model) ? model : 'gemma3:4b';
     setSelectedModel(next);
     localStorage.setItem('selectedModel', next);
-    console.log('モデル変更:', next);
   };
 
-  // 選択されたモデルでテキスト生成（ログ簡潔化）
+  // 選択モデルでテキスト生成
   const generateTextWithModel = async (prompt: string, model?: string): Promise<string> => {
     const modelToUse = model || selectedModel;
-    console.log('テキスト生成開始:', { preview: prompt.slice(0, 50) + (prompt.length > 50 ? '...' : ''), model: modelToUse });
-    
     try {
-      const res = await invoke<string>('generate_text_with_model', { 
-        prompt, 
-        model: modelToUse 
-      });
-      console.log('テキスト生成成功');
+      const res = await invoke<string>('generate_text_with_model', { prompt, model: modelToUse });
       return res;
     } catch (error) {
       console.error('テキスト生成エラー:', error);
@@ -79,15 +61,12 @@ export const useAIModel = () => {
     }
   };
 
-  // 従来のgenerateText（後方互換性のため）
-  const generateText = async (prompt: string): Promise<string> => {
-    return generateTextWithModel(prompt, selectedModel);
-  };
+  // 互換API
+  const generateText = async (prompt: string): Promise<string> => generateTextWithModel(prompt, selectedModel);
 
   const testGenerateText = async (): Promise<string> => {
     try {
       const res = await invoke<string>('test_generate_text');
-      console.log('テスト成功:', res);
       return res;
     } catch (error) {
       console.error('テストエラー:', error);
@@ -95,7 +74,7 @@ export const useAIModel = () => {
     }
   };
 
-  // AI応答生成（モデル選択対応）
+  // 応答生成
   const generateAIResponse = async (
     participantName: string,
     role: string,
@@ -114,7 +93,7 @@ export const useAIModel = () => {
       });
       return res;
     } catch (error) {
-      console.error('AI応答生成エラー:', error);
+      console.error('応答生成エラー:', error);
       throw error;
     }
   };
@@ -133,7 +112,7 @@ export const useAIModel = () => {
       });
       return res;
     } catch (error) {
-      console.error('議論要約エラー:', error);
+      console.error('要約エラー:', error);
       throw error;
     }
   };
@@ -152,7 +131,7 @@ export const useAIModel = () => {
       });
       return res;
     } catch (error) {
-      console.error('議論分析エラー:', error);
+      console.error('分析エラー:', error);
       throw error;
     }
   };
@@ -169,6 +148,6 @@ export const useAIModel = () => {
     testGenerateText,
     generateAIResponse,
     summarizeDiscussion,
-    analyzeDiscussionPoints
+    analyzeDiscussionPoints,
   };
 };

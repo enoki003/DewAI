@@ -18,8 +18,8 @@ interface Message {
   isUser: boolean;
 }
 
-// AI参加者の編集用型
-interface AICharacter {
+// 参加者プロファイル
+interface BotProfile {
   name: string;
   role: string;
   description: string;
@@ -34,7 +34,7 @@ export default function SessionsPage() {
   // 編集ドロワー用状態（プレイ画面と統一: タブ＋緑テーマ）
   const [editOpen, setEditOpen] = useState(false);
   const [editingSession, setEditingSession] = useState<SavedSession | null>(null);
-  const [editingAIData, setEditingAIData] = useState<AICharacter[]>([]);
+  const [editingBots, setEditingBots] = useState<BotProfile[]>([]);
   const [editUserParticipates, setEditUserParticipates] = useState(false);
   const [activeEditTab, setActiveEditTab] = useState<string>('ai-0');
 
@@ -97,22 +97,22 @@ export default function SessionsPage() {
   const openEdit = (session: SavedSession) => {
     try {
       const participantsData = JSON.parse(session.participants);
-      let aiData: AICharacter[] = [];
+      let bots: BotProfile[] = [];
       let userParticipates = false;
 
       if (participantsData && participantsData.aiData && Array.isArray(participantsData.aiData)) {
-        aiData = participantsData.aiData;
+        bots = participantsData.aiData;
         userParticipates = !!participantsData.userParticipates;
       } else if (Array.isArray(participantsData)) {
         // 旧形式：名前だけの配列
         userParticipates = participantsData.includes('ユーザー');
-        aiData = participantsData
+        bots = participantsData
           .filter((p: string) => p !== 'ユーザー')
           .map((name: string) => ({ name, role: 'AI', description: '' }));
       }
 
       setEditingSession(session);
-      setEditingAIData(aiData);
+      setEditingBots(bots);
       setEditUserParticipates(userParticipates);
       setActiveEditTab('ai-0');
       setEditOpen(true);
@@ -122,24 +122,24 @@ export default function SessionsPage() {
     }
   };
 
-  const updateAIDataField = (index: number, field: keyof AICharacter, value: string) => {
-    setEditingAIData(prev => {
+  const updateBotField = (index: number, field: keyof BotProfile, value: string) => {
+    setEditingBots(prev => {
       const next = [...prev];
-      next[index] = { ...next[index], [field]: value } as AICharacter;
+      next[index] = { ...next[index], [field]: value } as BotProfile;
       return next;
     });
   };
 
-  const addAI = () => {
-    setEditingAIData(prev => {
+  const addBot = () => {
+    setEditingBots(prev => {
       const next = [...prev, { name: '', role: '', description: '' }];
       setActiveEditTab(`ai-${next.length - 1}`);
       return next;
     });
   };
 
-  const removeAI = (index: number) => {
-    setEditingAIData(prev => {
+  const removeBot = (index: number) => {
+    setEditingBots(prev => {
       const next = prev.filter((_, i) => i !== index);
       const newIndex = Math.max(0, Math.min(index, next.length - 1));
       setActiveEditTab(`ai-${newIndex}`);
@@ -153,7 +153,7 @@ export default function SessionsPage() {
     try {
       const participantsData = {
         userParticipates: editUserParticipates,
-        aiData: editingAIData
+        aiData: editingBots,
       };
 
       await updateSessionParticipants(editingSession.id, JSON.stringify(participantsData));
@@ -187,9 +187,9 @@ export default function SessionsPage() {
       
       // 新形式（完全なAI情報付き）の場合
       if (participantsData.aiData && Array.isArray(participantsData.aiData)) {
-        const aiNames = participantsData.aiData.map((ai: any) => ai.name);
-        const userParticipates = participantsData.userParticipates || false;
-        const participants = userParticipates ? ['あなた', ...aiNames] : aiNames;
+        const names = participantsData.aiData.map((ai: any) => ai.name);
+        const user = participantsData.userParticipates || false;
+        const participants = user ? ['あなた', ...names] : names;
         return participants.join(', ');
       }
       
@@ -338,35 +338,35 @@ export default function SessionsPage() {
                   <HStack align="stretch" gap={4}>
                     <VStack minW={{ base: 'full', md: '180px' }} align="stretch" gap={2}>
                       <Tabs.List>
-                        {editingAIData.map((_, idx) => (
+                        {editingBots.map((_, idx) => (
                           <Tabs.Trigger key={idx} value={`ai-${idx}`}>
                             AI {idx + 1}
                           </Tabs.Trigger>
                         ))}
                       </Tabs.List>
-                      <Button size="xs" variant="outline" onClick={addAI}>＋ AIを追加</Button>
+                      <Button size="xs" variant="outline" onClick={addBot}>＋ AIを追加</Button>
                     </VStack>
 
                     <Box flex="1">
-                      {editingAIData.map((ai, idx) => (
+                      {editingBots.map((ai, idx) => (
                         <Tabs.Content key={idx} value={`ai-${idx}`}>
                           <Box p={3} borderRadius="md" border="1px solid" borderColor="border.muted">
                             <VStack align="stretch" gap={3}>
                               <HStack justify="space-between">
                                 <Text fontWeight="bold" color="green.fg">AI {idx + 1}</Text>
-                                <Button size="xs" variant="outline" colorPalette="red" onClick={() => removeAI(idx)} disabled={editingAIData.length <= 1}>このAIを削除</Button>
+                                <Button size="xs" variant="outline" colorPalette="red" onClick={() => removeBot(idx)} disabled={editingBots.length <= 1}>このAIを削除</Button>
                               </HStack>
                               <FieldRoot>
                                 <FieldLabel>名前</FieldLabel>
-                                <Input value={ai.name} onChange={(e) => updateAIDataField(idx, 'name', e.target.value)} placeholder="AI の名前" />
+                                <Input value={ai.name} onChange={(e) => updateBotField(idx, 'name', e.target.value)} placeholder="AI の名前" />
                               </FieldRoot>
                               <FieldRoot>
                                 <FieldLabel>役職</FieldLabel>
-                                <Input value={ai.role} onChange={(e) => updateAIDataField(idx, 'role', e.target.value)} placeholder="例：専門家、司会、反対派 など" />
+                                <Input value={ai.role} onChange={(e) => updateBotField(idx, 'role', e.target.value)} placeholder="例：専門家、司会、反対派 など" />
                               </FieldRoot>
                               <FieldRoot>
                                 <FieldLabel>説明</FieldLabel>
-                                <Textarea rows={3} value={ai.description} onChange={(e) => updateAIDataField(idx, 'description', e.target.value)} placeholder="得意分野や性格、役割など" />
+                                <Textarea rows={3} value={ai.description} onChange={(e) => updateBotField(idx, 'description', e.target.value)} placeholder="得意分野や性格、役割など" />
                               </FieldRoot>
                             </VStack>
                           </Box>
