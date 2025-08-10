@@ -19,10 +19,32 @@ export interface SessionAnalysisRow {
 }
 
 let db: Database | null = null;
+let metaInitialized = false;
 
 function getDb(): Database {
   if (!db) db = Database.get('sqlite:dewai.db');
   return db;
+}
+
+async function ensureSessionMetaTable() {
+  if (metaInitialized) return;
+  const conn = getDb();
+  // セッションの「最近開いた」時刻を管理するメタテーブル
+  await conn.execute(
+    'CREATE TABLE IF NOT EXISTS session_meta (session_id INTEGER PRIMARY KEY, last_opened_at TEXT NOT NULL)'
+  );
+  metaInitialized = true;
+}
+
+// セッションの「最終オープン時刻」を更新（存在しなければ作成）
+export async function updateSessionLastOpened(sessionId: number): Promise<void> {
+  await ensureSessionMetaTable();
+  const conn = getDb();
+  const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  await conn.execute(
+    'INSERT INTO session_meta (session_id, last_opened_at) VALUES ($1, $2) ON CONFLICT(session_id) DO UPDATE SET last_opened_at = excluded.last_opened_at',
+    [sessionId, now]
+  );
 }
 
 // 議論セッションを保存（新規）
@@ -38,7 +60,13 @@ export async function saveSession(
     'INSERT INTO sessions (topic, participants, messages, model, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)',
     [topic, participants, messages, model, now, now]
   );
-  return result.lastInsertId ?? 0;
+  const newId = result.lastInsertId ?? 0;
+
+  // 新規作成直後は「最近開いた」にも反映
+  if (newId > 0) {
+    await updateSessionLastOpened(newId);
+  }
+  return newId;
 }
 
 // メッセージ更新
@@ -61,11 +89,15 @@ export async function updateSessionParticipants(sessionId: number, participants:
   );
 }
 
-// 全セッション取得（新しい順）
+// 全セッション取得（最近開いた順 → なければ更新日時降順）
 export async function getAllSessions(): Promise<SavedSession[]> {
+  await ensureSessionMetaTable();
   const conn = getDb();
   const rows = await conn.select<SavedSession[]>(
-    'SELECT id, topic, participants, messages, model, created_at, updated_at FROM sessions ORDER BY datetime(updated_at) DESC'
+    'SELECT s.id, s.topic, s.participants, s.messages, s.model, s.created_at, s.updated_at \
+     FROM sessions s \
+     LEFT JOIN session_meta m ON m.session_id = s.id \
+     ORDER BY datetime(COALESCE(m.last_opened_at, s.updated_at)) DESC'
   );
   return rows ?? [];
 }
@@ -84,6 +116,8 @@ export async function getSessionById(sessionId: number): Promise<SavedSession | 
 export async function deleteSession(sessionId: number): Promise<void> {
   const conn = getDb();
   await conn.execute('DELETE FROM sessions WHERE id = $1', [sessionId]);
+  await ensureSessionMetaTable();
+  await conn.execute('DELETE FROM session_meta WHERE session_id = $1', [sessionId]);
 }
 
 // DBクローズ

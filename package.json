@@ -46,7 +46,7 @@
     "postcss": "^8.5.3",
     "typescript": "~5.6.2",
     "vite": "^6.2.3",
-    "vitest": "^2.0.5"
+    "vitest": "^3.2.4"
   },
   "description": "This template should help get you started developing with Tauri, React and Typescript in Vite.",
   "main": "index.js",

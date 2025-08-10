@@ -8,7 +8,7 @@ import {
   showParticipantsUpdateSuccess,
 } from '../components/ui/notifications';
 import { ConfirmDialog } from '../components/ui/confirm-dialog';
-import { getAllSessions, deleteSession as deleteDatabaseSession, SavedSession, updateSessionParticipants } from '../utils/database';
+import { getAllSessions, deleteSession as deleteDatabaseSession, SavedSession, updateSessionParticipants, updateSessionLastOpened } from '../utils/database';
 import { useAIModel } from '../hooks/useAIModel';
 
 interface Message {
@@ -69,6 +69,9 @@ export default function SessionsPage() {
         messages,
         isResume: true
       }));
+
+      // 「最近開いた」を更新
+      await updateSessionLastOpened(session.id);
       
       // playページに遷移（即開始）
       navigate('/play');
