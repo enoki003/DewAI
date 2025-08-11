@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { jsonrepair } from 'jsonrepair';
 
 // 許可するモデル（バックエンドと整合）
 const ALLOWED_PREFIXES = ['gemma3:1b', 'gemma3:4b'];
@@ -151,15 +152,30 @@ export const useAIModel = () => {
       let cleaned = raw.trim();
       if (cleaned.startsWith('```json')) cleaned = cleaned.replace(/^```json\s*/, '').replace(/\s*```$/, '');
       else if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '');
-      const parsed = JSON.parse(cleaned);
-      if (!Array.isArray(parsed)) throw new Error('JSONが配列ではありません');
-      return parsed
-        .filter((p: any) => p && typeof p.name === 'string')
-        .map((p: any) => ({
-          name: String(p.name).trim(),
-          role: String(p.role || '').trim(),
-          description: String(p.description || '').trim(),
-        }));
+
+      // まずは素直に JSON.parse、失敗したら jsonrepair で修復して再パース
+      try {
+        const parsed = JSON.parse(cleaned);
+        if (!Array.isArray(parsed)) throw new Error('JSONが配列ではありません');
+        return parsed
+          .filter((p: any) => p && typeof p.name === 'string')
+          .map((p: any) => ({
+            name: String(p.name).trim(),
+            role: String(p.role || '').trim(),
+            description: String(p.description || '').trim(),
+          }));
+      } catch (parseErr) {
+        const repaired = jsonrepair(cleaned);
+        const parsed2 = JSON.parse(repaired);
+        if (!Array.isArray(parsed2)) throw new Error('JSONが配列ではありません');
+        return parsed2
+          .filter((p: any) => p && typeof p.name === 'string')
+          .map((p: any) => ({
+            name: String(p.name).trim(),
+            role: String(p.role || '').trim(),
+            description: String(p.description || '').trim(),
+          }));
+      }
     } catch (error) {
       console.error('AIプロフィール生成エラー:', error);
       throw error;

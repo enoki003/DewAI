@@ -73,9 +73,14 @@ function Config() {
       const hintBase = bots[index]?.role ? `この参加者の役割は「${bots[index].role}」。` : '';
       const list = await generateAIProfiles(discussionTopic.trim(), 1, `${hintBase}1名分のみ生成。名前は重複不可。`);
       if (list && list[0]) {
-        const next = [...bots];
-        next[index] = list[0];
-        setBots(next);
+        // 関数型更新で競合回避
+        setBots(prev => {
+          const next = [...prev];
+          if (index >= 0 && index < next.length) {
+            next[index] = list[0];
+          }
+          return next;
+        });
       }
     } catch (e) {
       console.error('自動補完エラー:', e);
@@ -211,9 +216,14 @@ function Config() {
                     <Input
                       value={bot.name}
                       onChange={(e) => {
-                        const next = [...bots];
-                        next[index].name = e.target.value;
-                        setBots(next);
+                        const value = e.target.value;
+                        setBots(prev => {
+                          const next = [...prev];
+                          if (index >= 0 && index < next.length) {
+                            next[index] = { ...next[index], name: value };
+                          }
+                          return next;
+                        });
                       }}
                       placeholder="例: 田中太郎"
                     />
@@ -223,9 +233,14 @@ function Config() {
                     <Input
                       value={bot.role}
                       onChange={(e) => {
-                        const next = [...bots];
-                        next[index].role = e.target.value;
-                        setBots(next);
+                        const value = e.target.value;
+                        setBots(prev => {
+                          const next = [...prev];
+                          if (index >= 0 && index < next.length) {
+                            next[index] = { ...next[index], role: value };
+                          }
+                          return next;
+                        });
                       }}
                       placeholder="例: 環境政策専門家"
                     />
@@ -235,9 +250,14 @@ function Config() {
                     <Textarea
                       value={bot.description}
                       onChange={(e) => {
-                        const next = [...bots];
-                        next[index].description = e.target.value;
-                        setBots(next);
+                        const value = e.target.value;
+                        setBots(prev => {
+                          const next = [...prev];
+                          if (index >= 0 && index < next.length) {
+                            next[index] = { ...next[index], description: value };
+                          }
+                          return next;
+                        });
                       }}
                       rows={3}
                       placeholder="例: 20年以上環境問題に携わり、持続可能な開発に詳しい専門家。データに基づいた現実的な提案を重視する。"
