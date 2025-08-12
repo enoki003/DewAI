@@ -35,6 +35,7 @@ import {
 import { ChatMessage } from '../components/ui/chat-message';
 import { saveSession, updateSession, getSessionById, saveSessionAnalysis, updateSessionLastOpened, updateSessionParticipants } from '../utils/database';
 import { extractTopicsFromSummary } from "../utils/text";
+import { jsonrepair } from 'jsonrepair';
 
 // 参加者（AIプロファイル）
 interface BotProfile {
@@ -135,6 +136,10 @@ const PlayPage: React.FC = () => {
   };
   const addBot = () => {
     setEditingBots(prev => {
+      if (prev.length >= 5) {
+        showParticipantsUpdateError('AI参加者は最大5名までです');
+        return prev;
+      }
       const next = [...prev, { name: '', role: '', description: '' }];
       setActiveEditTab(`ai-${next.length - 1}`);
       return next;
@@ -465,7 +470,16 @@ const PlayPage: React.FC = () => {
         let cleaned = result.trim();
         if (cleaned.startsWith('```json')) cleaned = cleaned.replace(/^```json\s*/, '').replace(/\s*```$/, '');
         else if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '');
-        const parsed = JSON.parse(cleaned);
+
+        let parsed: any;
+        try {
+          parsed = JSON.parse(cleaned);
+        } catch (e1) {
+          // 壊れJSONを修復して再パース
+          const repaired = jsonrepair(cleaned);
+          parsed = JSON.parse(repaired);
+        }
+
         const valid: DiscussionAnalysis = {
           mainPoints: Array.isArray(parsed.mainPoints) ? parsed.mainPoints.filter((p: any) => p && typeof p.point === 'string' && typeof p.description === 'string') : [],
           participantStances: Array.isArray(parsed.participantStances) ? parsed.participantStances.filter((s: any) => s && typeof s.participant === 'string') : [],
@@ -1027,9 +1041,11 @@ const PlayPage: React.FC = () => {
                 <Box p={3} bg="green.subtle" borderRadius="md" border="1px solid" borderColor="green.muted">
                   <Checkbox.Root
                     checked={editUserParticipates}
-                    onCheckedChange={(details) => setEditUserParticipates(!!details.checked)}
+                    onCheckedChange={(details) => setEditUserParticipates(details.checked === true)}
                   >
-                    <Checkbox.Control />
+                    <Checkbox.Control>
+                      <Checkbox.Indicator />
+                    </Checkbox.Control>
                     <Checkbox.Label>あなた（ユーザー）も参加する</Checkbox.Label>
                   </Checkbox.Root>
                 </Box>
@@ -1045,7 +1061,7 @@ const PlayPage: React.FC = () => {
                           </Tabs.Trigger>
                         ))}
                       </Tabs.List>
-                      <Button size="xs" variant="outline" onClick={addBot}>＋ AIを追加</Button>
+                      <Button size="xs" variant="outline" onClick={addBot} disabled={editingBots.length >= 5}>＋ AIを追加</Button>
                     </VStack>
 
                     <Box flex="1">

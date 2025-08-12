@@ -6,6 +6,7 @@ import {
   showSessionDeleteError,
   showGenericError,
   showParticipantsUpdateSuccess,
+  showParticipantsUpdateError,
 } from '../components/ui/notifications';
 import { ConfirmDialog } from '../components/ui/confirm-dialog';
 import { getAllSessions, deleteSession as deleteDatabaseSession, SavedSession, updateSessionParticipants, updateSessionLastOpened } from '../utils/database';
@@ -133,6 +134,10 @@ export default function SessionsPage() {
 
   const addBot = () => {
     setEditingBots(prev => {
+      if (prev.length >= 5) {
+        showParticipantsUpdateError('AI参加者は最大5名までです');
+        return prev;
+      }
       const next = [...prev, { name: '', role: '', description: '' }];
       setActiveEditTab(`ai-${next.length - 1}`);
       return next;
@@ -327,9 +332,11 @@ export default function SessionsPage() {
                 <Box p={3} bg="green.subtle" borderRadius="md" border="1px solid" borderColor="green.muted">
                   <Checkbox.Root
                     checked={editUserParticipates}
-                    onCheckedChange={(details) => setEditUserParticipates(!!details.checked)}
+                    onCheckedChange={(details) => setEditUserParticipates(details.checked === true)}
                   >
-                    <Checkbox.Control />
+                    <Checkbox.Control>
+                      <Checkbox.Indicator />
+                    </Checkbox.Control>
                     <Checkbox.Label>あなた（ユーザー）も参加する</Checkbox.Label>
                   </Checkbox.Root>
                 </Box>
@@ -345,7 +352,7 @@ export default function SessionsPage() {
                           </Tabs.Trigger>
                         ))}
                       </Tabs.List>
-                      <Button size="xs" variant="outline" onClick={addBot}>＋ AIを追加</Button>
+                      <Button size="xs" variant="outline" onClick={addBot} disabled={editingBots.length >= 5}>＋ AIを追加</Button>
                     </VStack>
 
                     <Box flex="1">
