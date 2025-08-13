@@ -9,13 +9,6 @@ import {
   Spinner, 
   Badge,
   Stack,
-  // 追加: セッション編集ドロワーで使用
-  Input,
-  Checkbox,
-  Drawer,
-  FieldRoot,
-  FieldLabel,
-  Tabs
 } from '@chakra-ui/react';
 import { useAIModel } from '../hooks/useAIModel';
 import { useNavigate } from 'react-router-dom';
@@ -28,14 +21,11 @@ import {
   showInputTooLongWarning,
   showGenericError,
   showSessionResumeHint,
-  // 追加: 参加者更新トースト
-  showParticipantsUpdateSuccess,
-  showParticipantsUpdateError,
 } from '../components/ui/notifications';
 import { ChatMessage } from '../components/ui/chat-message';
 import { saveSession, updateSession, getSessionById, saveSessionAnalysis, updateSessionLastOpened, updateSessionParticipants } from '../utils/database';
-import { extractTopicsFromSummary } from "../utils/text";
 import { jsonrepair } from 'jsonrepair';
+import { ParticipantEditorDrawer } from '../components/ParticipantEditorDrawer';
 
 // 参加者（AIプロファイル）
 interface BotProfile {
@@ -79,7 +69,7 @@ interface DiscussionAnalysis {
 
 const PlayPage: React.FC = () => {
   const navigate = useNavigate();
-  const { generateAIResponse, summarizeDiscussion, analyzeDiscussionPoints, isModelLoaded, selectedModel, changeModel, checkModelStatus } = useAIModel();
+  const { generateAIResponse, summarizeDiscussion, analyzeDiscussionPoints, isModelLoaded, selectedModel, changeModel, checkModelStatus, incrementalSummarizeDiscussion } = useAIModel();
   
   // 画面状態
   const [config, setConfig] = useState<ScreenConfig | null>(null);
@@ -102,9 +92,9 @@ const PlayPage: React.FC = () => {
   
   // 要約/分析のための保持
   const [historySummary, setHistorySummary] = useState<string>(''); // 累積要約
+  const [lastSummarizedIndex, setLastSummarizedIndex] = useState<number>(0); // 要約済みメッセージ数
   const [, setRecentWindow] = useState<TalkMessage[]>([]); // 直近期
   const [turnCount, setTurnCount] = useState(0);
-  const [activeTopics, setActiveTopics] = useState<string[]>([]);
   const [summarizing, setSummarizing] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   
@@ -112,93 +102,10 @@ const PlayPage: React.FC = () => {
   const [analysis, setAnalysis] = useState<DiscussionAnalysis | null>(null);
   const [analysisOpen, setAnalysisOpen] = useState(false);
   
-  // 参加者編集（セッションページ準拠のドロワー実装）
+  // 参加者編集（再利用ドロワー）
   const [editOpen, setEditOpen] = useState(false);
-  const [editingBots, setEditingBots] = useState<BotProfile[]>([]);
-  const [editUserParticipates, setEditUserParticipates] = useState(false);
-  const [activeEditTab, setActiveEditTab] = useState<string>('ai-0');
-
-  const openEditor = () => {
-    if (!config) return;
-    setEditingBots(config.aiData?.map(b => ({ ...b })) || []);
-    setEditUserParticipates(!!config.participate);
-    setActiveEditTab('ai-0');
-    setEditOpen(true);
-  };
+  const openEditor = () => { if (!config) return; setEditOpen(true); };
   const closeEditor = () => setEditOpen(false);
-
-  const updateBotField = (index: number, field: keyof BotProfile, value: string) => {
-    setEditingBots(prev => {
-      const next = [...prev];
-      next[index] = { ...next[index], [field]: value } as BotProfile;
-      return next;
-    });
-  };
-  const addBot = () => {
-    setEditingBots(prev => {
-      if (prev.length >= 5) {
-        showParticipantsUpdateError('AI参加者は最大5名までです');
-        return prev;
-      }
-      const next = [...prev, { name: '', role: '', description: '' }];
-      setActiveEditTab(`ai-${next.length - 1}`);
-      return next;
-    });
-  };
-  const removeBot = (index: number) => {
-    setEditingBots(prev => {
-      const next = prev.filter((_, i) => i !== index);
-      const newIndex = Math.max(0, Math.min(index, next.length - 1));
-      setActiveEditTab(`ai-${newIndex}`);
-      return next;
-    });
-  };
-
-  const saveEdit = async () => {
-    if (!config) return;
-    try {
-      // 入力検証
-      if (editingBots.some(b => !b.name || !b.name.trim())) {
-        showParticipantsUpdateError('AI名を入力してください');
-        return;
-      }
-
-      const aiData = editingBots.map(b => ({
-        name: b.name.trim(),
-        role: (b.role || '').trim(),
-        description: (b.description || '').trim(),
-      }));
-
-      // 画面状態を更新
-      setConfig(prev => (prev ? { ...prev, aiData, participate: editUserParticipates } : prev));
-
-      // DBへ保存（既存セッション時）
-      if (sessionIdRef.current && sessionIdRef.current > 0) {
-        try {
-          await updateSessionParticipants(
-            sessionIdRef.current,
-            JSON.stringify({ userParticipates: editUserParticipates, aiData })
-          );
-        } catch (e) {
-          console.warn('[participants] DB更新失敗:', e);
-        }
-      }
-
-      // ターンインデックスを整合
-      setTurnIndex(prev => {
-        if (prev === 0) return editUserParticipates ? 0 : aiData.length > 0 ? 1 : 0;
-        const aiIdx = prev - 1;
-        if (aiIdx >= aiData.length) return editUserParticipates ? 0 : aiData.length > 0 ? 1 : 0;
-        return prev;
-      });
-
-      showParticipantsUpdateSuccess();
-      setEditOpen(false);
-    } catch (e) {
-      console.error('[participants] 更新失敗:', e);
-      showParticipantsUpdateError(`${e}`);
-    }
-  };
 
   // スクロール制御
   const messageListRef = useRef<HTMLDivElement>(null);
@@ -423,25 +330,63 @@ const PlayPage: React.FC = () => {
 
   // 必要に応じて要約
   const summarizeIfNeeded = async () => {
-    if (!config || messages.length < KEEP_RECENT_TURNS + 2) return;
+    if (!config) return;
+    const MIN_INITIAL_FULL = 12; // 初回フル要約閾値（発言数）
+    const MIN_INCREMENTAL_DELTA = 4; // インクリメンタル再要約の最小追加発言数
+
+    const totalMsgs = messages.length;
+    if (totalMsgs === 0) return;
+
+    // 初回: まだ summary が無い & 閾値到達
+    if (!historySummary) {
+      if (totalMsgs < MIN_INITIAL_FULL) return; // まだ十分に蓄積していない
+      try {
+        const history = messages.map(m => `${m.speaker}: ${m.message}`).join('\n');
+        const parts = [ ...(config.participate ? ['ユーザー'] : []), ...config.aiData.map(a => a.name) ];
+        setSummarizing(true);
+        const full = await summarizeDiscussion(config.discussionTopic, history, parts);
+        setHistorySummary(full);
+        setLastSummarizedIndex(totalMsgs);
+        localStorage.setItem('summaryLog', JSON.stringify([{ ts: Date.now(), type: 'full', size: totalMsgs, summary: full }]));
+        if (sessionId && sessionId > 0) {
+          try { await saveSessionAnalysis(sessionId, 'summary', JSON.stringify({ summary: full })); } catch (e) { console.warn('[save] 要約保存失敗:', e); }
+        }
+      } catch (e) {
+        console.error('[summary] 初回要約失敗:', e);
+        showAnalysisError('議論要約', `${e}`);
+      } finally {
+        setSummarizing(false);
+      }
+      return;
+    }
+
+    // 以降: 追加発言差分が一定数を超えたらインクリメンタル
+    const delta = totalMsgs - lastSummarizedIndex;
+    if (delta < MIN_INCREMENTAL_DELTA) return;
+
     try {
-      const target = messages.slice(0, -KEEP_RECENT_TURNS);
-      if (target.length === 0) return;
-      const history = target.map(m => `${m.speaker}: ${m.message}`).join('\n');
+      const newSlice = messages.slice(lastSummarizedIndex).map(m => `${m.speaker}: ${m.message}`).join('\n');
+      if (!newSlice) return;
       const parts = [ ...(config.participate ? ['ユーザー'] : []), ...config.aiData.map(a => a.name) ];
-
       setSummarizing(true);
-      const summary = await summarizeDiscussion(config.discussionTopic, history, parts);
-
-      setHistorySummary(prev => prev ? `${prev}\n\n${summary}` : summary);
-      setRecentWindow(messages.slice(-KEEP_RECENT_TURNS));
-      setActiveTopics(extractTopicsFromSummary(summary));
-
+      const updated = await incrementalSummarizeDiscussion(config.discussionTopic, historySummary, newSlice, parts);
+      setHistorySummary(updated);
+      setLastSummarizedIndex(totalMsgs);
+      // ログ追加
+      try {
+        const raw = localStorage.getItem('summaryLog');
+        let arr: any[] = [];
+        if (raw) { try { arr = JSON.parse(raw); if (!Array.isArray(arr)) arr = []; } catch { arr = []; } }
+        arr.push({ ts: Date.now(), type: 'incremental', size: totalMsgs, delta, summary: updated });
+        // 直近50件だけ保持
+        if (arr.length > 50) arr = arr.slice(-50);
+        localStorage.setItem('summaryLog', JSON.stringify(arr));
+      } catch (e) { console.warn('[summaryLog] 保存失敗', e); }
       if (sessionId && sessionId > 0) {
-        try { await saveSessionAnalysis(sessionId, 'summary', JSON.stringify({ summary, topics: extractTopicsFromSummary(summary) })); } catch (e) { console.warn('[save] 要約保存失敗:', e); }
+        try { await saveSessionAnalysis(sessionId, 'summary', JSON.stringify({ summary: updated, delta })); } catch (e) { console.warn('[save] インクリメンタル要約保存失敗:', e); }
       }
     } catch (e) {
-      console.error('[summary] 失敗:', e);
+      console.error('[summary] インクリメンタル失敗:', e);
       showAnalysisError('議論要約', `${e}`);
     } finally {
       setSummarizing(false);
@@ -719,18 +664,6 @@ const PlayPage: React.FC = () => {
             {analyzing && (
               <HStack gap={2} mt={summarizing ? 2 : 0}><Spinner colorPalette="green" size="sm" /><Text fontSize={{ base: "xs", md: "sm" }}>📊 議論を分析中です。少々時間がかかる場合がございます。</Text></HStack>
             )}
-          </Box>
-        )}
-
-        {/* 争点 */}
-        {activeTopics.length > 0 && (
-          <Box width="100%" p={{ base: 2, md: 3 }} bg="green.subtle" borderRadius="md" border="1px solid" borderColor="green.muted">
-            <Text fontSize={{ base: "xs", md: "sm" }} fontWeight="bold" mb={2}>🎯 現在の議論の争点:</Text>
-            <HStack wrap="wrap" gap={1}>
-              {activeTopics.map((t, i) => (
-                <Badge key={i} colorPalette="green" variant="subtle" size={{ base: "xs", md: "sm" }}>{t}</Badge>
-              ))}
-            </HStack>
           </Box>
         )}
 
@@ -1023,87 +956,35 @@ const PlayPage: React.FC = () => {
         </Box>
       )}
 
-      {/* 参加者編集ドロワー（Sessions準拠） */}
-      <Drawer.Root open={editOpen} onOpenChange={(d) => setEditOpen(d.open)} placement="end" size="md">
-        <Drawer.Backdrop />
-        <Drawer.Positioner>
-          <Drawer.Content>
-            <Drawer.Header>
-              <HStack justify="space-between" w="full">
-                <Drawer.Title>AI参加者の編集</Drawer.Title>
-                <Drawer.CloseTrigger />
-              </HStack>
-            </Drawer.Header>
-
-            <Drawer.Body>
-              <VStack align="stretch" gap={4}>
-                {/* 参加者設定 */}
-                <Box p={3} bg="green.subtle" borderRadius="md" border="1px solid" borderColor="green.muted">
-                  <Checkbox.Root
-                    checked={editUserParticipates}
-                    onCheckedChange={(details) => setEditUserParticipates(details.checked === true)}
-                  >
-                    <Checkbox.Control>
-                      <Checkbox.Indicator />
-                    </Checkbox.Control>
-                    <Checkbox.Label>あなた（ユーザー）も参加する</Checkbox.Label>
-                  </Checkbox.Root>
-                </Box>
-
-                {/* AIごとの編集（タブ） */}
-                <Tabs.Root value={activeEditTab} onValueChange={(details: any) => setActiveEditTab(details.value)} orientation="vertical">
-                  <HStack align="stretch" gap={4}>
-                    <VStack minW={{ base: 'full', md: '180px' }} align="stretch" gap={2}>
-                      <Tabs.List>
-                        {editingBots.map((_, idx) => (
-                          <Tabs.Trigger key={idx} value={`ai-${idx}`}>
-                            AI {idx + 1}
-                          </Tabs.Trigger>
-                        ))}
-                      </Tabs.List>
-                      <Button size="xs" variant="outline" onClick={addBot} disabled={editingBots.length >= 5}>＋ AIを追加</Button>
-                    </VStack>
-
-                    <Box flex="1">
-                      {editingBots.map((ai, idx) => (
-                        <Tabs.Content key={idx} value={`ai-${idx}`}>
-                          <Box p={3} borderRadius="md" border="1px solid" borderColor="border.muted">
-                            <VStack align="stretch" gap={3}>
-                              <HStack justify="space-between">
-                                <Text fontWeight="bold" color="green.fg">AI {idx + 1}</Text>
-                                <Button size="xs" variant="outline" colorPalette="red" onClick={() => removeBot(idx)} disabled={editingBots.length <= 1}>このAIを削除</Button>
-                              </HStack>
-                              <FieldRoot>
-                                <FieldLabel>名前</FieldLabel>
-                                <Input value={ai.name} onChange={(e) => updateBotField(idx, 'name', e.target.value)} placeholder="AI の名前" />
-                              </FieldRoot>
-                              <FieldRoot>
-                                <FieldLabel>役職</FieldLabel>
-                                <Input value={ai.role} onChange={(e) => updateBotField(idx, 'role', e.target.value)} placeholder="例：専門家、司会、反対派 など" />
-                              </FieldRoot>
-                              <FieldRoot>
-                                <FieldLabel>説明</FieldLabel>
-                                <Textarea rows={3} value={ai.description} onChange={(e) => updateBotField(idx, 'description', e.target.value)} placeholder="得意分野や性格、役割など" />
-                              </FieldRoot>
-                            </VStack>
-                          </Box>
-                        </Tabs.Content>
-                      ))}
-                    </Box>
-                  </HStack>
-                </Tabs.Root>
-              </VStack>
-            </Drawer.Body>
-
-            <Drawer.Footer>
-              <HStack w="full" justify="flex-end">
-                <Button variant="outline" onClick={closeEditor}>キャンセル</Button>
-                <Button colorPalette="green" onClick={saveEdit}>保存</Button>
-              </HStack>
-            </Drawer.Footer>
-          </Drawer.Content>
-        </Drawer.Positioner>
-      </Drawer.Root>
+      {/* 参加者編集ドロワー（再利用コンポーネント） */}
+      <ParticipantEditorDrawer
+        open={editOpen}
+        onClose={closeEditor}
+        initialBots={config.aiData}
+        initialUserParticipates={config.participate}
+        onSave={async (bots, userParticipates) => {
+          // ここでエラーを throw すると内部で成功トーストは表示されない
+          try {
+            const aiData = bots.map(b => ({ ...b }));
+            setConfig(prev => prev ? { ...prev, aiData, participate: userParticipates } : prev);
+            if (sessionIdRef.current && sessionIdRef.current > 0) {
+              await updateSessionParticipants(
+                sessionIdRef.current,
+                JSON.stringify({ userParticipates, aiData })
+              );
+            }
+            // ターンインデックス整合
+            setTurnIndex(prev => {
+              if (prev === 0) return userParticipates ? 0 : aiData.length > 0 ? 1 : 0;
+              const aiIdx = prev - 1;
+              if (aiIdx >= aiData.length) return userParticipates ? 0 : aiData.length > 0 ? 1 : 0;
+              return prev;
+            });
+          } catch (e) {
+            throw e; // コンポーネント側でエラー表示
+          }
+        }}
+      />
 
       {/* 入力エリア（固定） */}
       <Box borderTop="1px solid" borderColor="border.muted" bg="bg" p={{ base: 3, md: 4 }} width="100%" minWidth="100%">

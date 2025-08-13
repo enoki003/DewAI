@@ -60,56 +60,6 @@ JSON形式で以下の構造で出力してください：
 </instructions>
 </discussion_analysis>"#;
 
-const TPL_LIGHT_ANALYSIS: &str = r#"<discussion_analysis>
-<topic>{discussion_topic}</topic>
-<participants>{participants_list}</participants>
-
-<recent_conversation>
-{optimized_history}
-</recent_conversation>
-
-<instructions>
-直近の議論内容を分析し、以下の要素を簡潔に抽出してください：
-
-1. **現在の主要論点** - 最近の発言で議論されている具体的な争点（最大3点）
-2. **活発な参加者の立場** - 最近発言した参加者の現在の見解
-3. **新たな対立点** - 最近浮上した意見の相違（あれば）
-4. **直近の議論の方向性** - 議論がどの方向に進んでいるか
-
-JSON形式で以下の構造で出力してください：
-
-{
-  "currentMainPoints": [
-    {
-      "point": "論点の具体的な内容",
-      "recentness": "高/中/低"
-    }
-  ],
-  "activeParticipants": [
-    {
-      "participant": "参加者名",
-      "recentStance": "最近の立場・主張",
-      "engagement": "発言の活発度（高/中/低）"
-    }
-  ],
-  "newConflicts": [
-    {
-      "issue": "新たに対立している問題",
-      "description": "対立の概要"
-    }
-  ],
-  "discussionDirection": "議論の現在の方向性（一文で）"
-}
-
-重要：
-- 最近の発言内容のみに基づいて分析する
-- 「ユーザー」も他の参加者と同様に分析対象に含める
-- 推測は避け、実際の発言に基づいた分析のみ行う
-- 出力は純粋なJSONのみで、マークダウンのコードブロックや説明文は一切含めない
-- 必ず有効なJSON形式で応答すること
-</instructions>
-</discussion_analysis>"#;
-
 const TPL_AI_PROFILES: &str = r#"<ai_profiles_generation>
 <topic>{discussion_topic}</topic>
 <count>{count}</count>
@@ -120,10 +70,10 @@ const TPL_AI_PROFILES: &str = r#"<ai_profiles_generation>
 各要素は必ず次のキーを含めてください： name, role, description。
 
 要件：
-- name: 参加者の短い日本語の名前（一般的な人名）。
+- name: 参加者の短い日本語の名前（一般的な人名）。　テーマにそぐわなくてよいから、多様な名前を使用してください。
 - role: テーマに関連する役職/立場/専門領域。
-- description: 100文字前後で、その人物の視点・価値観・発言スタイルを簡潔に説明。
-- 視点がバラけるように、賛成・反対・懐疑・中立・実務など多様性を持たせる。
+- description: 100文字前後で、その人物の視点・価値観・発言スタイルを簡潔に説明。　テーマにそぐわなくてよいから、個性的な視点を持たせてください。
+- 視点がバラけるように、賛成・反対・懐疑・中立・実務など多様性を持たせる。テーマにそぐわなくてよいから、個性的な視点を持たせてください。
 - 参加者同士で名前・役割の重複は避ける。
 
 出力フォーマット（必ず純粋なJSONのみ。前後に説明やコードブロックは付けない）：
@@ -205,12 +155,6 @@ pub fn build_ai_response_prompt(
 
 回答は{participant_name}の発言内容のみを返してください。説明や注釈は不要です。
 日本語で口語の文章で発言してください。
-
-出力フォーマット（厳守）:
-- 先頭に名前・役職・ラベルを付けない（例: 「{participant_name}：」「ユーザー：」「（…）」は禁止）。
-- 他者の発言をそのまま引用しない。必要なら要旨のみ触れる。
-- コードブロックやタグ、制御文字、不要な記号（*、"、'、:、``` 等）を含めない。
-- 質問が必要な場合は最後に1つだけ添える。
 </instructions>
 </discussion_context>"#,
         discussion_topic = topic_e,
@@ -326,25 +270,47 @@ pub fn build_discussion_summary_prompt(
     )
 }
 
-// 発言境界のヒューリスティック分割（行頭にスピーカー名とコロン/全角コロンが現れる行を新規発言とみなす）
-fn split_messages_heuristic(text: &str) -> Vec<String> {
-    let mut msgs: Vec<String> = Vec::new();
-    let mut current = String::new();
+/// 要約プロンプト（既存要約 + 差分発言を統合して新しい要約を再構築）
+pub fn build_incremental_summary_prompt(
+    discussion_topic: &str,
+    previous_summary: &str,
+    new_messages: &str,
+    participants: &[String],
+) -> String {
+    let topic_e = xml_escape(discussion_topic);
+    let prev_e = xml_escape(previous_summary);
+    let diff_e = xml_escape(new_messages);
+    let participants_list = participants.iter().map(|s| xml_escape(s)).collect::<Vec<_>>().join(", ");
+    format!(r#"<incremental_discussion_summary>
+<topic>{topic}</topic>
+<participants>{participants}</participants>
 
-    for line in text.lines() {
-        let trimmed = line.trim_start();
-        let colon_pos = trimmed.find(':').or_else(|| trimmed.find('：'));
-        let looks_like_header = colon_pos.map(|pos| pos < 30).unwrap_or(false) && !line.starts_with(' ') && !line.starts_with('\t');
+<previous_summary>
+{previous_summary}
+</previous_summary>
 
-        if looks_like_header && !current.is_empty() {
-            msgs.push(current);
-            current = String::new();
-        }
-        if !current.is_empty() { current.push('\n'); }
-        current.push_str(line);
-    }
-    if !current.is_empty() { msgs.push(current); }
-    msgs
+<new_messages>
+{new_messages}
+</new_messages>
+
+<instructions>
+上記の previous_summary はこれまでの議論の要約です。new_messages は今回新たに追加された発言のみです。
+これらを統合し、同じフォーマット/粒度で最新の包括的要約を再生成してください。
+
+要件:
+- 既存の重要論点/未解決事項を維持しつつ、新規発言で追加/修正/解決された点を反映
+- 重複は統合し簡潔化
+- 以前の要約から削除すべき内容が明確な場合のみ削除（根拠のなく失われた情報は削除しない）
+- 形式は従来の【議論の争点】【提起された具体例・事例】... 等の見出し構造をそのまま踏襲
+- 追加された具体例/仮定/未解決課題を適切なセクションに組み込む
+- 出力は完全な最新要約のみ（差分表示や説明文を含めない）
+</instructions>
+</incremental_discussion_summary>"#,
+        topic = topic_e,
+        participants = participants_list,
+        previous_summary = prev_e,
+        new_messages = diff_e,
+    )
 }
 
 /// 会話履歴を分析用に最適化（重要な発言のみ抽出・要約）
@@ -361,25 +327,6 @@ pub fn optimize_conversation_for_analysis(conversation_history: &str, max_messag
     let start = msgs.len().saturating_sub(max_messages);
     let recent = msgs[start..].join("\n");
     format!("{}[...以前の発言は省略...]", recent)
-}
-
-/// 議論分析用プロンプト（最近の発言のみを対象）
-pub fn build_lightweight_discussion_analysis_prompt(
-    discussion_topic: &str,
-    conversation_history: &str,
-    participants: &[String],
-) -> String {
-    let participants_list = participants.iter().map(|s| xml_escape(s)).collect::<Vec<_>>().join(", ");
-    
-    // 会話履歴を最適化（最新10発言程度に制限）
-    let optimized_history = optimize_conversation_for_analysis(conversation_history, 10);
-    let topic_e = xml_escape(discussion_topic);
-    let hist_e = xml_escape(&optimized_history);
-    
-    TPL_LIGHT_ANALYSIS
-        .replace("{discussion_topic}", &topic_e)
-        .replace("{participants_list}", &participants_list)
-        .replace("{optimized_history}", &hist_e)
 }
 
 /// AI参加者設定（名前・役職・説明）をJSONで生成するプロンプト
@@ -402,4 +349,24 @@ pub fn build_ai_profiles_prompt(
         .replace("{discussion_topic}", &topic_e)
         .replace("{count}", &count.to_string())
         .replace("{hint_line}", &hint_line)
+}
+
+// ---（以下 split_messages_heuristic など既存の補助関数がこの下にある場合そのまま）---
+// 既存のヘルパー関数がこのファイル末尾にあるなら保持
+
+/// 発言履歴文字列をざっくり行単位で分割するヒューリスティック関数（元実装から必要最小限再構築）
+fn split_messages_heuristic(history: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in history.split('\n') {
+        let trimmed = line.trim();
+        if trimmed.is_empty() { continue; }
+        // 発言者ラベルっぽいパターンで始まるか、適度な長さの文を1行として扱う
+        if trimmed.contains(':') || trimmed.chars().count() > 8 {
+            out.push(trimmed.to_string());
+        }
+    }
+    if out.is_empty() && !history.trim().is_empty() {
+        out.push(history.trim().to_string());
+    }
+    out
 }

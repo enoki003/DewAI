@@ -118,6 +118,27 @@ export const useAIModel = () => {
     }
   };
 
+  const incrementalSummarizeDiscussion = async (
+    discussionTopic: string,
+    previousSummary: string,
+    newMessages: string,
+    participants: string[]
+  ): Promise<string> => {
+    try {
+      const res = await invoke<string>('incremental_summarize_discussion', {
+        discussionTopic,
+        previousSummary,
+        newMessages,
+        participants,
+        model: selectedModel,
+      });
+      return res;
+    } catch (error) {
+      console.error('インクリメンタル要約エラー:', error);
+      throw error;
+    }
+  };
+
   const analyzeDiscussionPoints = async (
     discussionTopic: string,
     conversationHistory: string,
@@ -194,6 +215,7 @@ export const useAIModel = () => {
     testGenerateText,
     generateAIResponse,
     summarizeDiscussion,
+    incrementalSummarizeDiscussion,
     analyzeDiscussionPoints,
     generateAIProfiles,
   };
