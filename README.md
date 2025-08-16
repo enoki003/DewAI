@@ -77,7 +77,11 @@ DewAI/
 │   │   ├── config.tsx            # AI設定（名前/役割/説明）
 │   │   ├── sessions.tsx          # セッション一覧/再開
 │   │   ├── database.tsx          # DB情報表示
-│   │   └── play.tsx              # メインチャット/分析パネル/参加者編集
+│   │   ├── play.tsx              # メインチャット
+│   │   └── play/                 # Playページの分割モジュール（2025-08）
+│   │       ├── AnalysisPanel.tsx # 議論分析の共通パネル
+│   │       ├── PlayTypes.ts      # BotProfile/TalkMessage等の型
+│   │       └── useTurn.ts        # 次ターン算出の純関数フック
 │   ├── utils/
 │   │   └── database.ts           # SQLite CRUD・スキーマ初期化
 │   └── main.tsx                  # エントリ（Provider + HashRouter）
@@ -90,7 +94,8 @@ DewAI/
 │   └── Cargo.toml
 ├── docs/
 │   ├── storage.md               # SQLiteスキーマ/保存仕様
-│   └── troubleshooting.md       # トラブルシューティング
+│   ├── architecture.md          # システム構成/フロー
+│   └── user-guide.md            # 利用ガイド
 └── package.json
 ```
 
@@ -170,6 +175,31 @@ npm run tauri build
   - 戻る操作時は保存完了を短時間待機するため、直近の発言が失われにくい。
 - セッション（Sessions）: 過去のセッション一覧と再開。
 - データベース（Database）: 保存状況の参考情報。
+
+## 要約/分析のタイミング（実装）
+
+- 要約（summary）
+  - 初回: 発言数が12件以上でフル要約を実行
+  - 以降: 直近の追加が4件以上でインクリメンタル要約
+  - UI/処理は `messages` の変更に同期したデバウンス済み `useEffect` で発火
+- 分析（analysis）
+  - 3ターン毎（`turnCount % 3 === 0`）に実行
+  - 解析結果はJSON整形/検証後に保存し、共通パネル `AnalysisPanel` で表示
+
+## 最近の変更（2025-08）
+
+- Playページをモジュール分割（`pages/play/`）
+  - `AnalysisPanel.tsx`: 分析UIを共通化（デスクトップ/モバイルで再利用）
+  - `PlayTypes.ts`: BotProfile/TalkMessage/DiscussionAnalysis 型を集約
+  - `useTurn.ts`: 次ターン算出を純関数化し再利用
+- トリガーの安定化
+  - 要約/分析は `useEffect` + デバウンスで最新stateを基準に発火
+  - 3ターン毎の分析で重複起動を防止（最後に分析したターンを保持）
+- レース条件対策
+  - AI自動連鎖時の多重実行を抑止するガードを導入
+- スクロール体験
+  - 最下部検知で「↓ 新しいメッセージを表示する」ボタンを表示
+  - 自動スクロールはユーザーの手動スクロールを尊重
 
 ## 技術スタック
 
