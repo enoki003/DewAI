@@ -107,6 +107,12 @@ const PlayPage: React.FC = () => {
   const openEditor = () => { if (!config) return; setEditOpen(true); };
   const closeEditor = () => setEditOpen(false);
 
+  // デバウンス/レース条件対策用のref
+  const summaryDebounceRef = useRef<number | null>(null);
+  const analysisDebounceRef = useRef<number | null>(null);
+  const lastAnalyzedTurnRef = useRef<number>(0); // 直近分析済みターン
+  const chainScheduledRef = useRef<boolean>(false); // 次ターン予約中フラグ
+
   // スクロール制御
   const messageListRef = useRef<HTMLDivElement>(null);
   const [, setUserScrolling] = useState(false);
@@ -149,6 +155,40 @@ const PlayPage: React.FC = () => {
   }, [messages, scrollToBottom]);
   
   const KEEP_RECENT_TURNS = 4; // 直近保持
+
+  // --- 要約トリガ（messages変更に追随、デバウンス） ---
+  useEffect(() => {
+    if (!config || messages.length === 0) return;
+    if (summaryDebounceRef.current) window.clearTimeout(summaryDebounceRef.current);
+    summaryDebounceRef.current = window.setTimeout(() => {
+      // 最新stateで実行（初回/インクリメンタルは内部ロジックに任せる）
+      if (!summarizing) {
+        void summarizeIfNeeded();
+      }
+    }, 250);
+    return () => {
+      if (summaryDebounceRef.current) window.clearTimeout(summaryDebounceRef.current);
+    };
+  }, [messages, config]);
+
+  // --- 分析トリガ（turnCountの最新値で3ターン毎、デバウンス） ---
+  useEffect(() => {
+    if (!config) return;
+    if (turnCount === 0 || messages.length < 3) return;
+    if (turnCount % 3 !== 0) return; // 3の倍数のみ
+    if (lastAnalyzedTurnRef.current === turnCount) return; // 同一ターンの重複防止
+
+    if (analysisDebounceRef.current) window.clearTimeout(analysisDebounceRef.current);
+    analysisDebounceRef.current = window.setTimeout(() => {
+      lastAnalyzedTurnRef.current = turnCount; // 予約時点で予約済みに
+      if (!analyzing) {
+        void analyzeIfNeeded();
+      }
+    }, 250);
+    return () => {
+      if (analysisDebounceRef.current) window.clearTimeout(analysisDebounceRef.current);
+    };
+  }, [turnCount, messages.length, config, analyzing]);
 
   // 初期化/復元
   useEffect(() => {
@@ -311,8 +351,7 @@ const PlayPage: React.FC = () => {
 
       try { await autoSaveSession(next); } catch (e) { console.warn('[save] 直後保存失敗:', e); }
 
-      await summarizeIfNeeded();
-      await analyzeIfNeeded();
+      // 要約/分析はuseEffectで最新stateに同期して発火
 
       try {
         setAwaitingAIResume(false);
@@ -493,6 +532,8 @@ const PlayPage: React.FC = () => {
   // AIターン
   const runAITurn = async (turnOverride?: number, baseMessages?: TalkMessage[]) => {
     if (!config) { console.log('[ai] 設定未読込'); return; }
+    // 次ターン予約中は外部からの任意実行を抑止（予約実行は許可)
+    if (chainScheduledRef.current && !(typeof turnOverride === 'number' && baseMessages)) { console.log('[ai] チェーン予約中のためスキップ'); return; }
     if (isGenerating || isSavingSession) { console.log('[ai] 多重実行スキップ'); return; }
     if (!isModelLoaded) { showOllamaConnectionError(); return; }
 
@@ -546,8 +587,10 @@ const PlayPage: React.FC = () => {
     } finally {
       setIsGenerating(false);
       if (scheduleNextTurn && nextBase) {
-        // 少し遅延して次AIを実行（多重実行ガードをクリアしてから）
+        // すぐに次ターンを予約し、外部トリガは抑止
+        chainScheduledRef.current = true;
         setTimeout(() => {
+          chainScheduledRef.current = false; // 予約実行開始時に解除
           runAITurn(scheduleNextTurn as number, nextBase);
         }, 0);
       }

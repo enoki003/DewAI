@@ -51,11 +51,6 @@ JSON形式で以下の構造で出力してください：
 }
 
 重要：
-- 参加者の立場は現在の発言に基づいて動的に分析する
-- 「ユーザー」も他の参加者と同様に分析対象に含める
-- 実際の発言内容から具体的に抽出する
-- 推測や仮定は避け、発言に基づいた分析のみ行う
-- 出力は純粋なJSONのみで、マークダウンのコードブロック（```json）や説明文は一切含めない
 - 必ず有効なJSON形式で応答すること
 </instructions>
 </discussion_analysis>"#;
@@ -76,7 +71,7 @@ const TPL_AI_PROFILES: &str = r#"<ai_profiles_generation>
 - 視点がバラけるように、賛成・反対・懐疑・中立・実務など多様性を持たせる。テーマにそぐわなくてよいから、個性的な視点を持たせてください。
 - 参加者同士で名前・役割の重複は避ける。
 
-出力フォーマット（必ず純粋なJSONのみ。前後に説明やコードブロックは付けない）：
+出力フォーマット（必ず純粋なJSONのみにしてください。）：
 
 [
   { "name": "", "role": "", "description": "" }
@@ -180,8 +175,8 @@ pub fn build_discussion_start_prompt(topic: &str, participants: &[String]) -> St
 参加者は{participants_list}です。
 
 議論を開始するための導入的な発言をしてください。以下の要素を含めてください：
-- テーマの紹介
-- 議論の方向性の提案
+- 主張の提示
+- 主張の根拠
 - 参加者への問いかけ
 
 自然で建設的な議論の開始を促すような発言をお願いします。
@@ -270,7 +265,7 @@ pub fn build_discussion_summary_prompt(
     )
 }
 
-/// 要約プロンプト（既存要約 + 差分発言を統合して新しい要約を再構築）
+/// インクリメンタル要約プロンプト（既存要約 + 差分発言を統合して新しい要約を再構築）
 pub fn build_incremental_summary_prompt(
     discussion_topic: &str,
     previous_summary: &str,
