@@ -9,11 +9,17 @@ import {
   createToaster,
 } from "@chakra-ui/react"
 
+/**
+ * グローバルに使うトースト通知インスタンス。
+ */
 export const toaster = createToaster({
   placement: "bottom-end",
   pauseOnPageIdle: true,
 })
 
+/**
+ * 画面右下にトーストを描画するコンポーネント。
+ */
 export const Toaster = () => {
   return (
     <Portal>

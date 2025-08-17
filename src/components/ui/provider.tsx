@@ -9,6 +9,9 @@ import type { PropsWithChildren } from 'react'
 import { ColorModeProvider } from './color-mode'
 import { Toaster } from './toaster'
 
+/**
+ * アプリ全体のChakra UI Providerとカラーモード/トーストのセットアップ。
+ */
 const system = createSystem(defaultConfig, {
   globalCss: {
     body: {
@@ -34,6 +37,7 @@ const system = createSystem(defaultConfig, {
   },
 })
 
+/** ルートプロバイダ。アプリを包んでテーマ/通知を提供します。 */
 export const Provider = (props: PropsWithChildren) => (
   <ChakraProvider value={system}>
     <ColorModeProvider>

@@ -5,10 +5,10 @@ import { Alert } from "@chakra-ui/react"
 import { toaster } from "./toaster"
 import { LuCheck, LuTriangleAlert, LuX, LuInfo } from "react-icons/lu"
 
-// アラートのタイプ定義
+/** 通知の種類 */
 export type AlertType = "success" | "warning" | "error" | "info"
 
-// 操作結果のアラートを表示する統一インターフェース
+/** showNotification のオプション */
 export interface NotificationOptions {
   type: AlertType
   title: string
@@ -17,7 +17,9 @@ export interface NotificationOptions {
   isClosable?: boolean
 }
 
-// Toastによる通知を表示
+/**
+ * Chakra Toaster を使って通知を表示します。
+ */
 export const showNotification = (options: NotificationOptions) => {
   const { type, title, description, duration = 5000, isClosable = true } = options
   
@@ -32,7 +34,7 @@ export const showNotification = (options: NotificationOptions) => {
 
 // 各種操作専用の通知関数
 
-// セッション削除成功
+/** セッション削除 成功 */
 export const showSessionDeleteSuccess = (sessionTopic: string) => {
   showNotification({
     type: "success",
@@ -42,7 +44,7 @@ export const showSessionDeleteSuccess = (sessionTopic: string) => {
   })
 }
 
-// セッション削除エラー
+/** セッション削除 エラー */
 export const showSessionDeleteError = (error: string) => {
   showNotification({
     type: "error",
@@ -52,7 +54,7 @@ export const showSessionDeleteError = (error: string) => {
   })
 }
 
-// セッション保存成功
+/** セッション保存 成功/更新 */
 export const showSessionSaveSuccess = (sessionTopic: string, isUpdate: boolean = false) => {
   showNotification({
     type: "success",
@@ -62,7 +64,7 @@ export const showSessionSaveSuccess = (sessionTopic: string, isUpdate: boolean =
   })
 }
 
-// セッション保存エラー
+/** セッション保存 エラー */
 export const showSessionSaveError = (error: string) => {
   showNotification({
     type: "error",
@@ -72,7 +74,7 @@ export const showSessionSaveError = (error: string) => {
   })
 }
 
-// 参加者情報更新 成功/失敗
+/** 参加者情報更新 成功 */
 export const showParticipantsUpdateSuccess = () => {
   showNotification({
     type: "success",
@@ -81,6 +83,7 @@ export const showParticipantsUpdateSuccess = () => {
   })
 }
 
+/** 参加者情報更新 失敗 */
 export const showParticipantsUpdateError = (error: string) => {
   showNotification({
     type: "error",
@@ -90,7 +93,7 @@ export const showParticipantsUpdateError = (error: string) => {
   })
 }
 
-// 分析 成功/エラー
+/** 分析 成功 */
 export const showAnalysisSuccess = () => {
   showNotification({
     type: "success",
@@ -99,7 +102,7 @@ export const showAnalysisSuccess = () => {
   })
 }
 
-// 分析エラー
+/** 分析 エラー */
 export const showAnalysisError = (analysisType: string, error: string) => {
   showNotification({
     type: "error",
@@ -109,7 +112,7 @@ export const showAnalysisError = (analysisType: string, error: string) => {
   })
 }
 
-// AI応答 成功/エラー/注意
+/** AI応答 生成情報 */
 export const showAIResponseGenerated = (name: string) => {
   showNotification({
     type: "info",
@@ -118,6 +121,7 @@ export const showAIResponseGenerated = (name: string) => {
   })
 }
 
+/** AI応答 エラー */
 export const showAIResponseError = (participantName: string, error: string) => {
   showNotification({
     type: "error",
@@ -127,6 +131,7 @@ export const showAIResponseError = (participantName: string, error: string) => {
   })
 }
 
+/** 入力が長過ぎる場合の警告 */
 export const showInputTooLongWarning = (current: number, max = 10000) => {
   showNotification({
     type: "warning",
@@ -136,7 +141,7 @@ export const showInputTooLongWarning = (current: number, max = 10000) => {
   })
 }
 
-// Ollama接続系
+/** Ollama接続エラー */
 export const showOllamaConnectionError = () => {
   showNotification({
     type: "warning",
@@ -146,6 +151,7 @@ export const showOllamaConnectionError = () => {
   })
 }
 
+/** モデル準備完了通知 */
 export const showModelLoadSuccess = () => {
   showNotification({
     type: "success",
@@ -155,6 +161,7 @@ export const showModelLoadSuccess = () => {
   })
 }
 
+/** モデル切替通知 */
 export const showModelChangeNotice = (model: string) => {
   showNotification({
     type: "info",
@@ -164,7 +171,7 @@ export const showModelChangeNotice = (model: string) => {
   })
 }
 
-// 復元ヒント
+/** セッション再開ヒント */
 export const showSessionResumeHint = () => {
   showNotification({
     type: "info",
@@ -174,7 +181,7 @@ export const showSessionResumeHint = () => {
   })
 }
 
-// 汎用警告/エラー
+/** 汎用警告 */
 export const showGenericWarning = (title: string, description?: string) => {
   showNotification({
     type: "warning",
@@ -184,6 +191,7 @@ export const showGenericWarning = (title: string, description?: string) => {
   })
 }
 
+/** 汎用エラー */
 export const showGenericError = (title: string, description?: string) => {
   showNotification({
     type: "error",
@@ -193,7 +201,7 @@ export const showGenericError = (title: string, description?: string) => {
   })
 }
 
-// インライン Alert コンポーネント（ページ内に埋め込み表示用）
+/** インライン Alert コンポーネント（ページ内に埋め込み表示用） */
 export interface InlineAlertProps {
   type: AlertType
   title: string
@@ -202,6 +210,7 @@ export interface InlineAlertProps {
   variant?: "subtle" | "surface" | "outline" | "solid"
 }
 
+/** ページ内で使う軽量なアラート表示 */
 export const InlineAlert = ({ 
   type, 
   title, 

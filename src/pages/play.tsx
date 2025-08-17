@@ -1,3 +1,43 @@
+/**
+ * @packageDocumentation
+ * Playページ（議論実行画面）。
+ *
+ * 本ページは、設定済みの参加者（AI/ユーザー）での議論を進行し、
+ * - AI応答生成（ローカルOllama経由）
+ * - 定期的な要約（フル/インクリメンタル）
+ * - 3ターン毎の自動分析（論点・立場・対立・合意・未踏領域）
+ * - セッションの自動保存/復元
+ * - 自動スクロールとスクロール検知
+ * を行います。
+ *
+ * 技術スタック:
+ * - フロントエンド: React + TypeScript + Chakra UI v3
+ * - ルーティング: HashRouter
+ * - AI通信: `useAIModel` フック（Tauri 経由で Rust → Ollama）
+ * - ストレージ: SQLite（`utils/database.ts` 経由）
+ *
+ * 重要な状態と概念:
+ * - `turnIndex`: 現在のターン（0=ユーザー、1..=AI参加者のインデックス+1）
+ * - `messages`: 発言履歴（末尾が最新）
+ * - `historySummary`: 要約済みテキスト（長大履歴の短縮に利用）
+ * - `turnCount`: ユーザー/AI問わず発言が追加されるたびに +1（分析トリガーに利用）
+ * - `awaitingAIResume`: 復元直後などに次のAI応答を継続する必要があるときに真
+ * - `isSavingSession`: セッション保存バリア。保存中は最新版スナップショットをキューして保存完了後に再保存
+ *
+ * 自動要約戦略:
+ * - 初回は発言が一定数以上（既定:12）溜まったときにフル要約
+ * - 以後は差分の発言数が閾値（既定:4）を超えたときにインクリメンタル要約
+ *
+ * 自動分析戦略:
+ * - `turnCount` が 3 の倍数になったタイミングで分析を実行
+ *
+ * 例:
+ * ```tsx
+ * // ルーティング
+ * <Route path="/play" element={<PlayPage />} />
+ * ```
+ */
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Box, 
@@ -30,54 +70,100 @@ import { ParticipantEditorDrawer } from '../components/ParticipantEditorDrawer';
 import { AnalysisPanel } from './play/AnalysisPanel';
 import { BotProfile, DiscussionAnalysis, ScreenConfig, TalkMessage } from './play/PlayTypes';
 
-// Playページコンポーネント
+/**
+ * 議論を実行するメインページコンポーネント。
+ *
+ * - セッションの開始/再開/保存を管理
+ * - ユーザー入力とAIターンの進行を制御
+ * - 要約と分析を自動的に実行
+ * - スクロールやモバイル/デスクトップの分析表示を管理
+ *
+ * @returns JSX.Element
+ */
 const PlayPage: React.FC = () => {
   const navigate = useNavigate();// React Routerのナビゲーションフック
   // AIモデルフックから必要な関数を取得
   const { generateAIResponse, summarizeDiscussion, analyzeDiscussionPoints, isModelLoaded, selectedModel, changeModel, checkModelStatus, incrementalSummarizeDiscussion } = useAIModel();
   
   // 状態定義
+  /** 現在の画面設定（議論テーマ/参加者/ユーザー参加可否） */
   const [config, setConfig] = useState<ScreenConfig | null>(null);
+  /** 表示と保存対象のメッセージ履歴（末尾が最新） */
   const [messages, setMessages] = useState<TalkMessage[]>([]);
+  /** 現在のターン（0=ユーザー、1..=AIインデックス+1） */
   const [turnIndex, setTurnIndex] = useState(0);
+  /** 入力欄のテキスト */
   const [inputText, setInputText] = useState('');
+  /** AI応答生成中フラグ（多重実行の抑止） */
   const [isGenerating, setIsGenerating] = useState(false);
+  /** 議論が開始されているか（開始前/進行中） */
   const [isActive, setIsActive] = useState(false);
 
   // セッション保存関連
+  /** 現在のセッションID（保存済みなら > 0） */
   const [sessionId, setSessionId] = useState<number | null>(null);
+  /** 最新のセッションIDを参照するためのRef（非同期処理間の漏斗） */
   const sessionIdRef = useRef<number | null>(null);
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
+  /** セッション復元モードか */
   const [isResumed, setIsResumed] = useState(false);
+  /** 戻る遷移先（復元時は /sessions、通常は /start → 開始設定画面へ） */
   const [backPath, setBackPath] = useState<string>('/start');
+  /** 復元直後にAIの続きを実行する必要があるか */
   const [awaitingAIResume, setAwaitingAIResume] = useState(false);
+  /** 保存バリア（保存中は最新版スナップショットをキュー） */
   const [isSavingSession, setIsSavingSession] = useState(false);
+  /** 再開ヒントトーストを一度だけ出す制御 */
   const resumeHintShownRef = useRef(false);
+  /** 保存中に到着した最新版メッセージスナップショット */
   const pendingMessagesRef = useRef<TalkMessage[] | null>(null);
 
   // 要約・分析関連
+  /** 長大履歴の要約文字列（プロンプト圧縮用） */
   const [historySummary, setHistorySummary] = useState<string>('');
+  /** 要約した時点のメッセージ数（差分要約トリガーの基準） */
   const [lastSummarizedIndex, setLastSummarizedIndex] = useState<number>(0);
+  /** 発言数カウンタ（ユーザー/AI問わず追加で +1） */
   const [turnCount, setTurnCount] = useState(0);
+  /** 要約実行中フラグ */
   const [summarizing, setSummarizing] = useState(false);
+  /** 分析実行中フラグ */
   const [analyzing, setAnalyzing] = useState(false);
+  /** 最新の分析結果 */
   const [analysis, setAnalysis] = useState<DiscussionAnalysis | null>(null);
+  /** 直近保持ターン数（それ以前は `historySummary` に集約） */
+  const KEEP_RECENT_TURNS = 4; // 直近保持ターン数
 
   // UI
+  /** 分析パネルの開閉状態 */
   const [analysisOpen, setAnalysisOpen] = useState(false);
+  /** 参加者編集ドロワーの開閉状態 */
   const [editOpen, setEditOpen] = useState(false);
+  /** 参加者編集ドロワーを開く */
   const openEditor = () => { if (!config) return; setEditOpen(true); };
+  /** 参加者編集ドロワーを閉じる */
   const closeEditor = () => setEditOpen(false);
 
   // スクロール制御
+  /** メッセージリストのスクロール要素参照 */
   const messageListRef = useRef<HTMLDivElement>(null);
+  /** ユーザーがスクロール操作中か（UIのための状態） */
   const [, setUserScrolling] = useState(false);
+  /** 新着時に自動で最下部へスクロールするか */
   const [autoScroll, setAutoScroll] = useState(true);
+  /** スクロール終了検知用のタイマーID */
   const scrollTimerRef = useRef<number | null>(null);
+  /** `autoScroll` の参照版（非同期境界での正確な判定のため） */
   const autoScrollRef = useRef(true);
+  /** ユーザースクロール中フラグの参照版 */
   const userScrollingRef = useRef(false);
+  /** スクロール終了検知のデバウンス時間(ms) */
+  const SCROLL_END_DEBOUNCE_MS = 150; // スクロール終了検知のデバウンス時間(150ms)
 
-  // 末尾にスクロール
+  /**
+   * メッセージ末尾にスクロールします。
+   * 自動スクロールが有効かつユーザー操作中でない場合にのみ実行します。
+   */
   const scrollToBottom = useCallback(() => {
     const el = messageListRef.current;
     if (!el) return;
@@ -86,7 +172,11 @@ const PlayPage: React.FC = () => {
     }
   }, []);
 
-  // 手動スクロール検知
+  /**
+   * メッセージリストのスクロールを監視し、
+   * 末尾にいるかどうかで `autoScroll` を切り替えます。
+   * スクロール終了はデバウンスで検知します。
+   */
   const handleScroll = useCallback(() => {
     if (!messageListRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = messageListRef.current;
@@ -100,7 +190,7 @@ const PlayPage: React.FC = () => {
     scrollTimerRef.current = window.setTimeout(() => {
       setUserScrolling(false);
       userScrollingRef.current = false;
-    }, 150);
+    }, SCROLL_END_DEBOUNCE_MS);
   }, []);
 
   // メッセージ更新時スクロール
@@ -114,13 +204,21 @@ const PlayPage: React.FC = () => {
   // 3ターン毎の自動分析（ユーザー/AI問わずカウント後に発火）
   useEffect(() => {
     analyzeIfNeeded();
+    //依存関係の警告を抑制（一時的）
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [turnCount]);
   
-  const KEEP_RECENT_TURNS = 4; // 直近保持
+
 
   // 初期化/復元
   useEffect(() => {
+    /**
+     * セッション復元フロー:
+     * - localStorage の `resumeSession` を検査
+     * - セッション/参加者/メッセージ/モデルを復元
+     * - 復元後の次ターンと継続実行要否を決定
+     * - `last_opened_at` を更新
+     */
     const resumeData = localStorage.getItem('resumeSession');
     if (resumeData) {
       try {
@@ -211,7 +309,7 @@ const PlayPage: React.FC = () => {
       }
     }
 
-    // 新規開始: localStorageの設定を読む
+    // 新規開始: localStorageの設定を読む：よみ込み失敗時は設定画面へ
     const savedConfig = localStorage.getItem('aiConfig');
     if (!savedConfig) { navigate('/config'); return; }
     try {
@@ -225,13 +323,19 @@ const PlayPage: React.FC = () => {
     }
   }, []);
 
-  // 表示用参加者（ユーザーを先頭に付与）
+  /**
+   * 表示用の参加者配列（ユーザーが先頭に来るよう整形）。
+   * `turnIndex` の強調色判定にも利用します。
+   */
   const displayParticipants = config ? [
     ...(config.participate ? [{ name: 'あなた', role: 'あなた', description: '議論の参加者' }] : []),
     ...config.aiData
   ] : [];
 
-  // 議論開始
+  /**
+   * 議論を開始します。ユーザーが不参加の場合は先頭AIのターンから開始します。
+   * モデル未接続時はエラートーストを表示します。
+   */
   const startSession = async () => {
     if (isSavingSession) { console.log('[session] 保存中のため開始を待機'); return; }
     if (!isModelLoaded) { console.log('[session] モデル未接続'); showOllamaConnectionError(); return; }
@@ -254,7 +358,10 @@ const PlayPage: React.FC = () => {
     }
   };
 
-  // 復元後のAI続き
+  /**
+   * 復元直後などにAI応答の続きを実行します。
+   * モデル未接続時はエラートーストを表示します。
+   */
   const continueAIResponse = async () => {
     if (isSavingSession) { console.log('[session] 保存中のため続行待機'); return; }
     if (!isModelLoaded) { console.log('[session] モデル未接続'); showOllamaConnectionError(); return; }
@@ -262,7 +369,10 @@ const PlayPage: React.FC = () => {
     try { await runAITurn(); } catch (e) { console.error('[ai] 続行失敗:', e); showAIResponseError('AI参加者', `${e}`); }
   };
 
-  // ユーザー送信
+  /**
+   * ユーザーの発言を確定して履歴に追加し、必要に応じて要約/分析を実行した後、
+   * 次のAIターンをトリガーします。
+   */
   const handleSubmit = async () => {
     const trimmed = inputText.trim();
     if (!trimmed || isGenerating || isSavingSession) { console.log('[input] 無効または処理中'); return; }
@@ -296,7 +406,11 @@ const PlayPage: React.FC = () => {
     }
   };
 
-  // 必要に応じて要約
+  /**
+   * 必要に応じて要約を実行します。
+   * - 初回は一定件数以上でフル要約
+   * - 以降は差分件数に応じてインクリメンタル要約
+   */
   const summarizeIfNeeded = async () => {
     if (!config) return;
     const MIN_INITIAL_FULL = 12; // 初回フル要約閾値（発言数）
@@ -361,13 +475,19 @@ const PlayPage: React.FC = () => {
     }
   };
 
-  // 必要に応じて分析（3ターン毎）
+  /**
+   * 必要に応じて3ターン毎の自動分析を実行します。
+   * 条件に満たない場合は何もしません。
+   */
   const analyzeIfNeeded = async () => {
     if (!config || turnCount % 3 !== 0 || turnCount === 0 || messages.length < 3) return;
     await runAnalysis();
   };
 
-  // 分析実行
+  /**
+   * 議論の分析を実行し、解析結果をUIとストレージに反映します。
+   * JSONの破損に耐えるために `jsonrepair` で修復を試みます。
+   */
   const runAnalysis = async () => {
     if (!config || messages.length === 0 || isSavingSession) {
       console.log('[analysis] 条件未満でスキップ');
@@ -418,7 +538,10 @@ const PlayPage: React.FC = () => {
     }
   };
 
-  // サイレント保存（保存中は最新スナップショットをキューに入れて完了後に再保存）
+  /**
+   * サイレント保存（多重保存時は最新版スナップショットをキューして単一フライトに連結）。
+   * 既存セッションは更新、新規は作成してIDを確定します。
+   */
   const autoSaveSession = async (messagesToSave?: TalkMessage[]) => {
     const current = messagesToSave || messages;
     if (!config || current.length === 0) { console.log('[save] 保存対象なし'); return; }
@@ -458,7 +581,13 @@ const PlayPage: React.FC = () => {
     }
   };
 
-  // AIターン
+  /**
+   * 指定ターン（未指定なら現在の `turnIndex`）のAI参加者で応答を生成し、
+   * 履歴/保存/次ターン計算までを行います。ユーザー参加ON時は次のAIが続く場合に自動チェーンします。
+   *
+   * @param turnOverride 実行するターンの上書き（0=ユーザー、1..=AI）
+   * @param baseMessages 応答生成の基準とする履歴スナップショット（未指定なら現在の `messages`）
+   */
   const runAITurn = async (turnOverride?: number, baseMessages?: TalkMessage[]) => {
     if (!config) { console.log('[ai] 設定未読込'); return; }
     if (isGenerating || isSavingSession) { console.log('[ai] 多重実行スキップ'); return; }
@@ -522,7 +651,10 @@ const PlayPage: React.FC = () => {
     }
   };
 
-  // 戻る前に短時間保存を待機
+  /**
+   * 戻るボタン押下時にセッション保存の完了を短時間だけ待ち、
+   * 完了またはタイムアウト（2秒）で遷移します。
+   */
   const handleBack = async () => {
     try {
       await autoSaveSession(messages);

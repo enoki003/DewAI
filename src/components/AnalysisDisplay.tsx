@@ -1,3 +1,11 @@
+/**
+ * 議論の分析結果を視覚的に表示するコンポーネント群。
+ * - 主な論点
+ * - 参加者の立場
+ * - 対立点
+ * - 進行状況評価 と簡易統計
+ */
+
 import React from 'react';
 import { 
   Box, 
@@ -7,14 +15,16 @@ import {
   Badge 
 } from '@chakra-ui/react';
 
-interface DiscussionMessage {
+/** 議論メッセージの最小構造 */
+export interface DiscussionMessage {
   speaker: string;
   message: string;
   isUser: boolean;
   timestamp: Date;
 }
 
-interface AnalysisResult {
+/** 分析結果の構造 */
+export interface AnalysisResult {
   mainPoints: { point: string; description: string }[];
   participantStances: { 
     participant: string; 
@@ -33,11 +43,17 @@ interface AnalysisResult {
   };
 }
 
-interface AnalysisDisplayProps {
+/** AnalysisDisplay コンポーネントのプロパティ */
+export interface AnalysisDisplayProps {
+  /** 解析済みの議論情報。未解析時はnull */
   analysis: AnalysisResult | null;
+  /** 表示中セッションのメッセージ一覧（統計表示に使用） */
   messages: DiscussionMessage[];
 }
 
+/**
+ * 議論の分析結果をカード形式で表示します。
+ */
 export const AnalysisDisplay: React.FC<AnalysisDisplayProps> = ({
   analysis,
   messages

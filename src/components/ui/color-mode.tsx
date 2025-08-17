@@ -7,22 +7,31 @@ import type { ThemeProviderProps } from "next-themes"
 import * as React from "react"
 import { LuMoon, LuSun } from "react-icons/lu"
 
+/** ColorModeProvider のプロパティ */
 export interface ColorModeProviderProps extends ThemeProviderProps {}
 
+/**
+ * next-themes を用いたカラーモード（light/dark）プロバイダ。
+ */
 export function ColorModeProvider(props: ColorModeProviderProps) {
   return (
     <ThemeProvider attribute="class" disableTransitionOnChange {...props} />
   )
 }
 
+/** カラーモードの種別 */
 export type ColorMode = "light" | "dark"
 
+/** useColorMode() の返却型 */
 export interface UseColorModeReturn {
   colorMode: ColorMode
   setColorMode: (colorMode: ColorMode) => void
   toggleColorMode: () => void
 }
 
+/**
+ * 現在のカラーモードと切替関数を提供するフック。
+ */
 export function useColorMode(): UseColorModeReturn {
   const { resolvedTheme, setTheme } = useTheme()
   const toggleColorMode = () => {
@@ -35,18 +44,26 @@ export function useColorMode(): UseColorModeReturn {
   }
 }
 
+/**
+ * カラーモードに応じて値を切り替えるユーティリティ。
+ */
 export function useColorModeValue<T>(light: T, dark: T) {
   const { colorMode } = useColorMode()
   return colorMode === "dark" ? dark : light
 }
 
+/** 現在のモードに応じたアイコン（太陽/月） */
 export function ColorModeIcon() {
   const { colorMode } = useColorMode()
   return colorMode === "dark" ? <LuMoon /> : <LuSun />
 }
 
-interface ColorModeButtonProps extends Omit<IconButtonProps, "aria-label"> {}
+/** ColorModeButton のプロパティ */
+export interface ColorModeButtonProps extends Omit<IconButtonProps, "aria-label"> {}
 
+/**
+ * カラーモード切替ボタン。
+ */
 export const ColorModeButton = React.forwardRef<
   HTMLButtonElement,
   ColorModeButtonProps
@@ -74,6 +91,7 @@ export const ColorModeButton = React.forwardRef<
   )
 })
 
+/** 明示的にライトモードとしてレンダリングするラッパー */
 export const LightMode = React.forwardRef<HTMLSpanElement, SpanProps>(
   function LightMode(props, ref) {
     return (
@@ -90,6 +108,7 @@ export const LightMode = React.forwardRef<HTMLSpanElement, SpanProps>(
   },
 )
 
+/** 明示的にダークモードとしてレンダリングするラッパー */
 export const DarkMode = React.forwardRef<HTMLSpanElement, SpanProps>(
   function DarkMode(props, ref) {
     return (

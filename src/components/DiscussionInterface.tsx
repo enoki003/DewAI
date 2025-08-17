@@ -1,3 +1,7 @@
+/**
+ * シンプルな議論UIコンポーネント。
+ * メッセージ履歴と入力欄、送信/自動生成ボタンを提供します。
+ */
 import React from 'react';
 import { 
   Box, 
@@ -10,23 +14,35 @@ import {
   Badge 
 } from '@chakra-ui/react';
 
-interface DiscussionMessage {
+/** メッセージの最小構造 */
+export interface DiscussionMessage {
   speaker: string;
   message: string;
   isUser: boolean;
   timestamp: Date;
 }
 
-interface DiscussionInterfaceProps {
+/** DiscussionInterface コンポーネントのプロパティ */
+export interface DiscussionInterfaceProps {
+  /** 表示するメッセージ一覧 */
   messages: DiscussionMessage[];
+  /** 入力中テキスト */
   currentInput: string;
+  /** 入力テキスト変更時に呼ばれる */
   onInputChange: (value: string) => void;
+  /** 入力内容を送信 */
   onSendMessage: () => void;
+  /** 次のAI発言を生成 */
   onGenerateNext: () => void;
+  /** 議論が開始済みか */
   discussionStarted: boolean;
+  /** 処理中スピナー表示制御 */
   isProcessing: boolean;
 }
 
+/**
+ * メッセージリストと入力欄を持つ議論インターフェース。
+ */
 export const DiscussionInterface: React.FC<DiscussionInterfaceProps> = ({
   messages,
   currentInput,

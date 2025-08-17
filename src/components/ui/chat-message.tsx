@@ -1,31 +1,41 @@
 import { Box, VStack, HStack, Text, Avatar } from '@chakra-ui/react';
 
-interface DiscussionMessage {
+/** チャットメッセージの最小構造 */
+export interface DiscussionMessage {
   speaker: string;
   message: string;
   isUser: boolean;
   timestamp: Date | string;
 }
 
-interface ChatMessageProps {
+/** ChatMessage コンポーネントのプロパティ */
+export interface ChatMessageProps {
+  /** 表示するメッセージ */
   message: DiscussionMessage;
+  /** リスト内インデックス（keyやテスト用途） */
   index: number;
 }
 
-// 参加者名から安定したカラー名を生成（chakraの基本パレット名）
-const baseColors = [
-  'red', 'orange', 'yellow', 'green', 'teal',
-  'blue', 'cyan', 'purple', 'pink', 'gray'
-] as const;
-const getAvatarBaseColor = (name: string): (typeof baseColors)[number] => {
-  const sum = (name || '').split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  return baseColors[Math.abs(sum) % baseColors.length];
-};
-
+/**
+ * 1件のメッセージを会話UIとして描画します。
+ * - ユーザー/AIでスタイルを切替
+ * - 参加者名から安定したカラーを算出
+ * - タイムスタンプ表示
+ */
 export function ChatMessage({ message, index }: ChatMessageProps) {
+  // 参加者名から安定したカラー名を生成（chakraの基本パレット名）
+  const baseColors = [
+    'red', 'orange', 'yellow', 'green', 'teal',
+    'blue', 'cyan', 'purple', 'pink', 'gray'
+  ] as const;
+  const getAvatarBaseColor = (name: string): (typeof baseColors)[number] => {
+    const sum = (name || '').split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return baseColors[Math.abs(sum) % baseColors.length];
+  };
+
   const baseColor = getAvatarBaseColor(message?.speaker || '');
 
-  // 表示崩れ防止のための基本的なサニタイゼーション
+  // 表示崩れ防止のための基本的なサニタイズ処理
   const rawText = typeof message?.message === 'string' ? message.message : '';
   const sanitizedMessage = rawText
     .replace(/\t/g, '    ') // タブを4スペースに変換

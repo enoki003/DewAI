@@ -7,17 +7,29 @@ import {
   Text
 } from '@chakra-ui/react';
 
-interface ConfirmDialogProps {
+/** ConfirmDialog のプロパティ */
+export interface ConfirmDialogProps {
+  /** ダイアログを開くためのトリガー要素 */
   trigger: React.ReactElement;
+  /** タイトル */
   title: string;
-  message: React.ReactNode; // テキスト以外も許容
+  /** 本文。リッチ要素も可 */
+  message: React.ReactNode;
+  /** 確定ボタンの表示テキスト */
   confirmText?: string;
+  /** キャンセルボタンの表示テキスト */
   cancelText?: string;
+  /** 確定時に呼ばれる処理（Promise対応） */
   onConfirm: () => void | Promise<void>;
+  /** キャンセル時に呼ばれる処理 */
   onCancel?: () => void;
+  /** 破壊的操作かどうか（色の切替に使用） */
   variant?: 'destructive' | 'default';
 }
 
+/**
+ * 汎用的な確認ダイアログ。
+ */
 export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   trigger,
   title,

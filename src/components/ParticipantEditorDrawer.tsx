@@ -1,3 +1,9 @@
+/**
+ * 参加者（AI）プロフィール編集用のドロワーコンポーネント。
+ * - 名前 / 役職 / 説明 を編集
+ * - ユーザー参加の有無
+ * - 複数AIの追加/削除
+ */
 import React, { useState, useEffect } from 'react';
 import { 
   Drawer,
@@ -19,22 +25,34 @@ import {
   showGenericError
 } from './ui/notifications';
 
+/** AI参加者のプロフィール */
 export interface BotProfile {
   name: string;
   role: string;
   description: string;
 }
 
-interface ParticipantEditorDrawerProps {
+/** ParticipantEditorDrawer のプロパティ */
+export interface ParticipantEditorDrawerProps {
+  /** ドロワーの開閉状態 */
   open: boolean;
+  /** 閉じる要求時に呼ばれる */
   onClose: () => void;
+  /** 編集対象の初期AI配列 */
   initialBots: BotProfile[];
+  /** ユーザーが議論に参加するか */
   initialUserParticipates: boolean;
+  /** 保存ハンドラ。正しく保存できれば resolve すること */
   onSave: (bots: BotProfile[], userParticipates: boolean) => Promise<void> | void;
+  /** 追加できるAIの最大数（既定: 5） */
   maxBots?: number;
+  /** ヘッダータイトル */
   title?: string;
 }
 
+/**
+ * 参加者編集ドロワー。
+ */
 export const ParticipantEditorDrawer: React.FC<ParticipantEditorDrawerProps> = ({
   open,
   onClose,

@@ -2,16 +2,30 @@ import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { jsonrepair } from 'jsonrepair';
 
-// 許可するモデル（バックエンドと整合）
+/**
+ * 許可するOllamaモデルの接頭辞一覧。
+ * Gemma3 1B/4BのみをUI上で選択可能にします。
+ * @internal
+ */
 const ALLOWED_PREFIXES = ['gemma3:1b', 'gemma3:4b'];
 const isAllowedModel = (m: string) => ALLOWED_PREFIXES.some(p => m?.startsWith(p));
 
+/**
+ * DewAI のAI操作をまとめたカスタムフック。
+ * - モデル状態確認/切替
+ * - 参加者応答生成
+ * - 議論の要約（フル/インクリメンタル）
+ * - 議論分析
+ */
 export const useAIModel = () => {
   const [isModelLoaded, setIsModelLoaded] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string>('gemma3:4b');
   const [availableModels, setAvailableModels] = useState<string[]>([]);
 
-  // モデル状態チェック
+  /**
+   * Ollamaに接続できているかを確認します。
+   * @returns 接続可否
+   */
   const checkModelStatus = async (): Promise<boolean> => {
     try {
       const result = await invoke<boolean>('is_model_loaded');
@@ -24,7 +38,9 @@ export const useAIModel = () => {
     }
   };
 
-  // 利用可能なモデル一覧
+  /**
+   * Ollamaから利用可能なモデル一覧を取得します。
+   */
   const loadAvailableModels = async () => {
     try {
       const models = await invoke<string[]>('get_available_models');
@@ -43,14 +59,20 @@ export const useAIModel = () => {
     if (savedModel && isAllowedModel(savedModel)) setSelectedModel(savedModel);
   }, []);
 
-  // モデル変更
+  /**
+   * 使用するモデルを切り替えます。許可外の場合は既定の gemma3:4b になります。
+   */
   const changeModel = (model: string) => {
     const next = isAllowedModel(model) ? model : 'gemma3:4b';
     setSelectedModel(next);
     localStorage.setItem('selectedModel', next);
   };
 
-  // 選択モデルでテキスト生成
+  /**
+   * 明示したモデルでテキスト生成を行います。
+   * @param prompt プロンプト
+   * @param model 使用するモデル（未指定時は選択中のモデル）
+   */
   const generateTextWithModel = async (prompt: string, model?: string): Promise<string> => {
     const modelToUse = model || selectedModel;
     try {
@@ -62,9 +84,12 @@ export const useAIModel = () => {
     }
   };
 
-  // 互換API
+  /**
+   * 選択中モデルでテキスト生成を行います。
+   */
   const generateText = async (prompt: string): Promise<string> => generateTextWithModel(prompt, selectedModel);
 
+  /** Tauriバックエンドの疎通確認用メソッド。 */
   const testGenerateText = async (): Promise<string> => {
     try {
       const res = await invoke<string>('test_generate_text');
@@ -75,7 +100,9 @@ export const useAIModel = () => {
     }
   };
 
-  // 応答生成
+  /**
+   * 1人のAI参加者の応答を生成します。
+   */
   const generateAIResponse = async (
     participantName: string,
     role: string,
@@ -99,6 +126,9 @@ export const useAIModel = () => {
     }
   };
 
+  /**
+   * 議論全体の要約を生成します（初回フル）。
+   */
   const summarizeDiscussion = async (
     discussionTopic: string,
     conversationHistory: string,
@@ -118,6 +148,9 @@ export const useAIModel = () => {
     }
   };
 
+  /**
+   * 直近の追加発言のみを反映したインクリメンタル要約を生成します。
+   */
   const incrementalSummarizeDiscussion = async (
     discussionTopic: string,
     previousSummary: string,
@@ -139,6 +172,9 @@ export const useAIModel = () => {
     }
   };
 
+  /**
+   * 論点や立場など、議論の分析情報（JSON文字列）を生成します。
+   */
   const analyzeDiscussionPoints = async (
     discussionTopic: string,
     conversationHistory: string,
@@ -158,6 +194,12 @@ export const useAIModel = () => {
     }
   };
 
+  /**
+   * 指定テーマに適したAI参加者プロフィール案を生成します。
+   * @param discussionTopic テーマ
+   * @param desiredCount 生成数（既定: 4）
+   * @param styleHint 文体・役割のヒント
+   */
   const generateAIProfiles = async (
     discussionTopic: string,
     desiredCount = 4,
@@ -204,8 +246,11 @@ export const useAIModel = () => {
   };
 
   return {
+    /** モデル接続状態 */
     isModelLoaded,
+    /** 現在選択中のモデル */
     selectedModel,
+    /** 利用可能モデル一覧 */
     availableModels,
     checkModelStatus,
     loadAvailableModels,
