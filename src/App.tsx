@@ -8,7 +8,7 @@ const Start = lazy(() => import('./pages/start'));
 const Config = lazy(() => import('./pages/config'));
 const Play = lazy(() => import('./pages/play'));
 const Sessions = lazy(() => import('./pages/sessions'));
-const Database = lazy(() => import('./pages/database'));
+// const Database = lazy(() => import('./pages/database'));
 
 /**
  * 遅延読み込み中に表示するローディングコンポーネント。
@@ -32,7 +32,6 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/start" element={<Start />} />
         <Route path="/sessions" element={<Sessions />} />
-        <Route path="/database" element={<Database />} />
         <Route path="/config" element={<Config />} />
         <Route path="/play" element={<Play />} />
         <Route path="*" element={<Navigate to="/" replace />} />

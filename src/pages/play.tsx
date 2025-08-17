@@ -131,6 +131,8 @@ const PlayPage: React.FC = () => {
   const [analyzing, setAnalyzing] = useState(false);
   /** 最新の分析結果 */
   const [analysis, setAnalysis] = useState<DiscussionAnalysis | null>(null);
+  /** 最後に分析を実行した時点のメッセージ数（開閉時の不要リクエスト抑止に使用） */
+  const [lastAnalyzedCount, setLastAnalyzedCount] = useState<number>(0);
   /** 直近保持ターン数（それ以前は `historySummary` に集約） */
   const KEEP_RECENT_TURNS = 4; // 直近保持ターン数
 
@@ -161,8 +163,8 @@ const PlayPage: React.FC = () => {
   const SCROLL_END_DEBOUNCE_MS = 150; // スクロール終了検知のデバウンス時間(150ms)
 
   /**
-   * メッセージ末尾にスクロールします。
-   * 自動スクロールが有効かつユーザー操作中でない場合にのみ実行します。
+   * メッセージ末尾にスクロール。
+   * 自動スクロールが有効かつユーザー操作中でない場合にのみ実行。
    */
   const scrollToBottom = useCallback(() => {
     const el = messageListRef.current;
@@ -175,7 +177,7 @@ const PlayPage: React.FC = () => {
   /**
    * メッセージリストのスクロールを監視し、
    * 末尾にいるかどうかで `autoScroll` を切り替えます。
-   * スクロール終了はデバウンスで検知します。
+   * スクロール終了はデバウンスで検知。
    */
   const handleScroll = useCallback(() => {
     if (!messageListRef.current) return;
@@ -235,16 +237,17 @@ const PlayPage: React.FC = () => {
               sessionIdRef.current = parsed.sessionId;
               setIsResumed(true);
 
-              // 参加者復元（新形式のみ）
+              // 参加者復元
               const participantsObj = JSON.parse(session.participants);
               if (!participantsObj || !Array.isArray(participantsObj.aiData)) {
                 throw new Error('participantsフォーマットが不正です');
               }
               const bots: BotProfile[] = participantsObj.aiData;
-              const userParticipates = !!participantsObj.userParticipates;
-              setConfig({ discussionTopic: session.topic, aiData: bots, participate: userParticipates });
+              const userParticipatesFlag:boolean = participantsObj.userParticipates ?? [];//??はNull合体演算子で左辺がNullまたはundefinedなら右辺を返す
+              setConfig({ discussionTopic: session.topic, aiData: bots, participate: userParticipatesFlag });
 
               // 使用モデル復元
+              // 条件式： モデルを持つ(session) ∧ (session.model ≠ 選択中モデル)
               if (session.model && session.model !== selectedModel) {
                 changeModel(session.model);
                 showModelChangeNotice(session.model);
@@ -266,33 +269,79 @@ const PlayPage: React.FC = () => {
                 showOllamaConnectionError();
               }
 
-              // 最近開いた更新
+              // 最近開いたセッションを更新
               try { await updateSessionLastOpened(parsed.sessionId); } catch (e) { console.warn('[resume] last_opened_at 更新失敗:', e); }
 
-              // 次ターン決定
-              if (saved.length > 0) {
-                const last = saved[saved.length - 1];
-                const lastSpeaker = last.speaker;
-                if (lastSpeaker === 'ユーザー') {
-                  setTurnIndex(1);
-                  setAwaitingAIResume(true);
+              // // 発言者の決定
+
+              // setTurnCount(saved.length);
+              // if (saved.length > 0) {
+              //   const last = saved[saved.length - 1];
+              //   const lastSpeaker = last.speaker;
+              //   if (lastSpeaker === 'ユーザー') {
+              //     setTurnIndex(1);
+              //     setAwaitingAIResume(true);
+              //   } else {
+              //     const aiNames = bots.map(b => b.name);
+              //     const idx = aiNames.indexOf(lastSpeaker);
+              //     if (idx >= 0 && idx < aiNames.length - 1) {
+              //       setTurnIndex(idx + 2);
+              //       setAwaitingAIResume(true);
+              //     } else {
+              //       const next = userParticipates ? 0 : 1;
+              //       setTurnIndex(next);
+              //       if (next > 0) setAwaitingAIResume(true);
+              //     }
+              //   }
+              // } else {
+              //   const initial = userParticipates ? 0 : 1;
+              //   setTurnIndex(initial);
+              //   if (initial > 0) setAwaitingAIResume(true);
+
+              // }
+
+
+              // 発言者の決定
+                setTurnCount(saved.length);
+
+                const botCount = bots.length;
+
+                if (saved.length === 0) {
+                const initialTurnIndex = userParticipatesFlag ? 0 : (botCount > 0 ? 1 : 0);
+                setTurnIndex(initialTurnIndex);
+                if (initialTurnIndex > 0) setAwaitingAIResume(true);
                 } else {
-                  const aiNames = bots.map(b => b.name);
-                  const idx = aiNames.indexOf(lastSpeaker);
-                  if (idx >= 0 && idx < aiNames.length - 1) {
-                    setTurnIndex(idx + 2);
-                    setAwaitingAIResume(true);
+                const lastMessage = saved[saved.length - 1];
+                const lastSpeaker = lastMessage?.speaker ?? '';
+
+                // 直前スロット s を決定（ユーザー=0、AI_k = k(1..botCount)）
+                const lastBotIndex = bots.findIndex(b => b.name === lastSpeaker); // 0-based, 見つからなければ -1
+                const lastSlot = (lastSpeaker === 'ユーザー')
+                  ? 0
+                  : (lastBotIndex >= 0 ? lastBotIndex + 1 : 1); // 未一致は AI1
+
+                // 次スロット t を決定
+                let nextTurnIndex: number;
+                if (userParticipatesFlag) {
+                  // t = (s+1) mod (botCount+1)
+                  nextTurnIndex = (lastSlot + 1) % (botCount + 1);
+                } else {
+                  //t = (k mod botCount) + 1
+                  if (botCount === 0) {
+                  nextTurnIndex = 0; // AI不在ならユーザー扱いに戻す
                   } else {
-                    const next = userParticipates ? 0 : 1;
-                    setTurnIndex(next);
-                    if (next > 0) setAwaitingAIResume(true);
+                    //lastSlot<=1の時に、1にする。また、その値のうち、BOTの数を超える数を防ぐ。すなわち、1<=k<=numBotsの範囲にする
+                    const boundedSlot = Math.min(Math.max(1, lastSlot), botCount); // s を 1..botCount に丸める
+
+                  // AI参加者の次スロットは (s mod botCount) + 1
+                  nextTurnIndex = (boundedSlot % botCount) + 1;
                   }
                 }
-              } else {
-                const initial = userParticipates ? 0 : 1;
-                setTurnIndex(initial);
-                if (initial > 0) setAwaitingAIResume(true);
-              }
+
+                setTurnIndex(nextTurnIndex);
+                if (nextTurnIndex > 0) setAwaitingAIResume(true);
+                }
+
 
               console.log('[resume] 完了 msg=', saved.length);
             } catch (e) {
@@ -325,7 +374,7 @@ const PlayPage: React.FC = () => {
 
   /**
    * 表示用の参加者配列（ユーザーが先頭に来るよう整形）。
-   * `turnIndex` の強調色判定にも利用します。
+   * `turnIndex` の強調色判定にも利用。
    */
   const displayParticipants = config ? [
     ...(config.participate ? [{ name: 'あなた', role: 'あなた', description: '議論の参加者' }] : []),
@@ -333,8 +382,8 @@ const PlayPage: React.FC = () => {
   ] : [];
 
   /**
-   * 議論を開始します。ユーザーが不参加の場合は先頭AIのターンから開始します。
-   * モデル未接続時はエラートーストを表示します。
+   * 議論を開始。ユーザーが不参加の場合は先頭AIのターンから開始。
+   * モデル未接続時はエラートーストを表示。
    */
   const startSession = async () => {
     if (isSavingSession) { console.log('[session] 保存中のため開始を待機'); return; }
@@ -359,8 +408,8 @@ const PlayPage: React.FC = () => {
   };
 
   /**
-   * 復元直後などにAI応答の続きを実行します。
-   * モデル未接続時はエラートーストを表示します。
+   * 復元直後などにAI応答の続きを実行。
+   * モデル未接続時はエラートーストを表示。
    */
   const continueAIResponse = async () => {
     if (isSavingSession) { console.log('[session] 保存中のため続行待機'); return; }
@@ -371,7 +420,7 @@ const PlayPage: React.FC = () => {
 
   /**
    * ユーザーの発言を確定して履歴に追加し、必要に応じて要約/分析を実行した後、
-   * 次のAIターンをトリガーします。
+   * 次のAIターンをトリガー。
    */
   const handleSubmit = async () => {
     const trimmed = inputText.trim();
@@ -407,7 +456,7 @@ const PlayPage: React.FC = () => {
   };
 
   /**
-   * 必要に応じて要約を実行します。
+   * 必要に応じて要約を実行。
    * - 初回は一定件数以上でフル要約
    * - 以降は差分件数に応じてインクリメンタル要約
    */
@@ -476,21 +525,28 @@ const PlayPage: React.FC = () => {
   };
 
   /**
-   * 必要に応じて3ターン毎の自動分析を実行します。
+   * 必要に応じて3ターン毎の自動分析を実行。
    * 条件に満たない場合は何もしません。
    */
   const analyzeIfNeeded = async () => {
     if (!config || turnCount % 3 !== 0 || turnCount === 0 || messages.length < 3) return;
+    // 直近と同一内容ならスキップ（無駄な再分析防止）
+    if (messages.length <= lastAnalyzedCount) return;
     await runAnalysis();
   };
 
   /**
-   * 議論の分析を実行し、解析結果をUIとストレージに反映します。
+   * 議論の分析を実行し、解析結果をUIとストレージに反映。
    * JSONの破損に耐えるために `jsonrepair` で修復を試みます。
    */
   const runAnalysis = async () => {
     if (!config || messages.length === 0 || isSavingSession) {
       console.log('[analysis] 条件未満でスキップ');
+      return;
+    }
+    // 重複実行ガード
+    if (analyzing) {
+      console.log('[analysis] 実行中のためスキップ');
       return;
     }
     try {
@@ -521,6 +577,8 @@ const PlayPage: React.FC = () => {
           unexploredAreas: Array.isArray(parsed.unexploredAreas) ? parsed.unexploredAreas.filter((x: any) => typeof x === 'string') : [],
         };
         setAnalysis(valid);
+        // この時点のメッセージ数を記録（次回開閉時の不要実行を抑止）
+        setLastAnalyzedCount(messages.length);
         showAnalysisSuccess();
         if (sessionId && sessionId > 0) {
           try { await saveSessionAnalysis(sessionId, 'analysis', JSON.stringify(valid)); } catch (e) { console.warn('[save] 分析保存失敗:', e); }
@@ -540,7 +598,7 @@ const PlayPage: React.FC = () => {
 
   /**
    * サイレント保存（多重保存時は最新版スナップショットをキューして単一フライトに連結）。
-   * 既存セッションは更新、新規は作成してIDを確定します。
+   * 既存セッションは更新、新規は作成してIDを確定。
    */
   const autoSaveSession = async (messagesToSave?: TalkMessage[]) => {
     const current = messagesToSave || messages;
@@ -583,7 +641,7 @@ const PlayPage: React.FC = () => {
 
   /**
    * 指定ターン（未指定なら現在の `turnIndex`）のAI参加者で応答を生成し、
-   * 履歴/保存/次ターン計算までを行います。ユーザー参加ON時は次のAIが続く場合に自動チェーンします。
+   * 履歴/保存/次ターン計算までを行います。ユーザー参加ON時は次のAIが続く場合に自動チェーン。
    *
    * @param turnOverride 実行するターンの上書き（0=ユーザー、1..=AI）
    * @param baseMessages 応答生成の基準とする履歴スナップショット（未指定なら現在の `messages`）
@@ -653,7 +711,7 @@ const PlayPage: React.FC = () => {
 
   /**
    * 戻るボタン押下時にセッション保存の完了を短時間だけ待ち、
-   * 完了またはタイムアウト（2秒）で遷移します。
+   * 完了またはタイムアウト（2秒）で遷移。
    */
   const handleBack = async () => {
     try {
@@ -774,8 +832,18 @@ const PlayPage: React.FC = () => {
             colorPalette="green" 
             variant={analysisOpen ? "solid" : "outline"}
             onClick={() => {
-              setAnalysisOpen(!analysisOpen);
-              if (!analysisOpen && !analysis && messages.length > 2) runAnalysis();
+              const nextOpen = !analysisOpen;
+              setAnalysisOpen(nextOpen);
+              // 初回または未分析時のみ、かつ未実行中・十分なメッセージ数・未分析または新規発言がある場合にだけ実行
+              if (
+                nextOpen &&
+                !analyzing &&
+                messages.length > 2 &&
+                messages.length > lastAnalyzedCount &&
+                (!analysis || messages.length > lastAnalyzedCount)
+              ) {
+                runAnalysis();
+              }
             }}
           >
             <Text display={{ base: "none", md: "block" }}>{analysisOpen ? '分析パネルを閉じる' : '議論分析パネルを開く'}</Text>
@@ -856,7 +924,7 @@ const PlayPage: React.FC = () => {
                 <AnalysisPanel
                   analysis={analysis}
                   analyzing={analyzing}
-                  onRefresh={() => { if (messages.length > 2) runAnalysis(); }}
+                  onRefresh={() => { if (!analyzing && messages.length > 2) runAnalysis(); }}
                   canRefresh={messages.length > 2}
                 />
               </Box>
@@ -877,7 +945,7 @@ const PlayPage: React.FC = () => {
               <AnalysisPanel
                 analysis={analysis}
                 analyzing={analyzing}
-                onRefresh={() => { if (messages.length > 2) runAnalysis(); }}
+                onRefresh={() => { if (!analyzing && messages.length > 2) runAnalysis(); }}
                 canRefresh={messages.length > 2}
               />
             </Box>
