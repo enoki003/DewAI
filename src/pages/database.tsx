@@ -1,13 +1,25 @@
+/**
+ * @packageDocumentation
+ * データベース統計ページ。保存済みセッションから簡単な統計（総数/直近7日）を計算して表示します。
+ */
+
 import { Box, VStack, HStack, Text, Button, CardRoot, CardBody, Spinner, Heading, Badge } from '@chakra-ui/react';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAllSessions } from '../utils/database';
 
+/** DB統計の表示用オブジェクト */
 interface DatabaseStats {
   total_sessions: number;
   recent_sessions: number;
 }
 
+/**
+ * データベース統計を表示するページコンポーネント。
+ *
+ * - getAllSessions() を用いて統計を算出
+ * - 再取得ボタン/セッション一覧への導線を提供
+ */
 export default function DatabasePage() {
   const [stats, setStats] = useState<DatabaseStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -17,6 +29,7 @@ export default function DatabasePage() {
     loadStats();
   }, []);
 
+  /** 統計の再取得 */
   const loadStats = async () => {
     try {
       setLoading(true);

@@ -1,3 +1,8 @@
+/**
+ * @packageDocumentation
+ * セッション一覧ページ（Sessions）。保存済みの議論セッションの閲覧・再開・参加者編集・削除を行えます。
+ */
+
 import { Box, VStack, HStack, Text, Button, CardRoot, CardBody, Spinner, Heading } from '@chakra-ui/react';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -11,6 +16,7 @@ import { getAllSessions, deleteSession as deleteDatabaseSession, SavedSession, u
 import { useAIModel } from '../hooks/useAIModel';
 import { ParticipantEditorDrawer, BotProfile as DrawerBotProfile } from '../components/ParticipantEditorDrawer';
 
+/** セッション内の単一メッセージ */
 interface Message {
   speaker: string;
   message: string;
@@ -18,13 +24,20 @@ interface Message {
   isUser: boolean;
 }
 
-// 参加者プロファイル
+/** 参加者プロファイル（このページ内の型定義） */
 interface BotProfile {
   name: string;
   role: string;
   description: string;
 }
 
+/**
+ * 保存済みセッションの一覧と操作を提供するページコンポーネント。
+ *
+ * - 続きから開始（Play復元フロー起動）
+ * - 参加者編集（DrawerでAI人数/プロフィール/ユーザー参加可否を変更）
+ * - 削除（確認ダイアログ付き）
+ */
 export default function SessionsPage() {
   const [sessions, setSessions] = useState<SavedSession[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,6 +54,7 @@ export default function SessionsPage() {
     loadSessions();
   }, []);
 
+  /** セッション一覧をロード */
   const loadSessions = async () => {
     try {
       setLoading(true);
@@ -55,6 +69,7 @@ export default function SessionsPage() {
     }
   };
 
+  /** 指定セッションを復元してPlayへ遷移 */
   const continueSession = async (session: SavedSession) => {
     try {
       // セッションデータを復元
@@ -82,6 +97,7 @@ export default function SessionsPage() {
     }
   };
 
+  /** 指定セッションを削除して一覧を更新 */
   const deleteSession = async (sessionId: number, sessionTopic: string) => {
     try {
       await deleteDatabaseSession(sessionId);
@@ -93,7 +109,7 @@ export default function SessionsPage() {
     }
   };
 
-  // 参加者情報の編集ドロワーを開く
+  /** 参加者編集ドロワーを開く */
   const openEdit = (session: SavedSession) => {
     try {
       const participantsData = JSON.parse(session.participants);
@@ -115,11 +131,13 @@ export default function SessionsPage() {
     }
   };
 
+  /** ISO文字列から日本語ロケールの日時へ */
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
     return date.toLocaleString('ja-JP');
   };
 
+  /** メッセージ配列の長さを取得 */
   const getMessageCount = (messagesStr: string) => {
     try {
       const messages = JSON.parse(messagesStr);
@@ -129,6 +147,7 @@ export default function SessionsPage() {
     }
   };
 
+  /** 参加者情報の表示用テキストを構築 */
   const getParticipantInfo = (participantsStr: string) => {
     try {
       const participantsData = JSON.parse(participantsStr);

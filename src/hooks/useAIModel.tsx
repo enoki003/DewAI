@@ -11,13 +11,70 @@ const ALLOWED_PREFIXES = ['gemma3:1b', 'gemma3:4b'];
 const isAllowedModel = (m: string) => ALLOWED_PREFIXES.some(p => m?.startsWith(p));
 
 /**
+ * useAIModel フックが提供するAPIの型。
+ */
+export interface UseAIModelApi {
+  /** モデル接続状態 */
+  isModelLoaded: boolean;
+  /** 現在選択中のモデル（例: "gemma3:4b"） */
+  selectedModel: string;
+  /** 利用可能モデル一覧（Ollamaから取得） */
+  availableModels: string[];
+  /** Ollamaのヘルスを確認し、接続状態を更新して返します。 */
+  checkModelStatus: () => Promise<boolean>;
+  /** モデル一覧をOllamaから読み込みます。 */
+  loadAvailableModels: () => Promise<void>;
+  /** 使用するモデルを切り替えます（未許可は gemma3:4b にフォールバック）。 */
+  changeModel: (model: string) => void;
+  /** 選択中モデルで任意プロンプトを生成します。 */
+  generateText: (prompt: string) => Promise<string>;
+  /** 指定モデルで任意プロンプトを生成します。 */
+  generateTextWithModel: (prompt: string, model?: string) => Promise<string>;
+  /** バックエンド疎通確認用のテキスト生成。 */
+  testGenerateText: () => Promise<string>;
+  /** 1人のAI参加者の応答を生成します。 */
+  generateAIResponse: (
+    participantName: string,
+    role: string,
+    description: string,
+    conversationHistory: string,
+    discussionTopic: string
+  ) => Promise<string>;
+  /** 議論全体の初回フル要約を生成します。 */
+  summarizeDiscussion: (
+    discussionTopic: string,
+    conversationHistory: string,
+    participants: string[]
+  ) => Promise<string>;
+  /** 差分のみを反映するインクリメンタル要約を生成します。 */
+  incrementalSummarizeDiscussion: (
+    discussionTopic: string,
+    previousSummary: string,
+    newMessages: string,
+    participants: string[]
+  ) => Promise<string>;
+  /** 議論の論点・立場などの分析（JSON文字列）を生成します。 */
+  analyzeDiscussionPoints: (
+    discussionTopic: string,
+    conversationHistory: string,
+    participants: string[]
+  ) => Promise<string>;
+  /** テーマに適したAI参加者プロフィールの候補を生成します。 */
+  generateAIProfiles: (
+    discussionTopic: string,
+    desiredCount?: number,
+    styleHint?: string
+  ) => Promise<Array<{ name: string; role: string; description: string }>>;
+}
+
+/**
  * DewAI のAI操作をまとめたカスタムフック。
  * - モデル状態確認/切替
  * - 参加者応答生成
  * - 議論の要約（フル/インクリメンタル）
  * - 議論分析
  */
-export const useAIModel = () => {
+export const useAIModel = (): UseAIModelApi => {
   const [isModelLoaded, setIsModelLoaded] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string>('gemma3:4b');
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -61,6 +118,7 @@ export const useAIModel = () => {
 
   /**
    * 使用するモデルを切り替えます。許可外の場合は既定の gemma3:4b になります。
+   * @param model モデル名（例: "gemma3:4b"）
    */
   const changeModel = (model: string) => {
     const next = isAllowedModel(model) ? model : 'gemma3:4b';
@@ -72,6 +130,7 @@ export const useAIModel = () => {
    * 明示したモデルでテキスト生成を行います。
    * @param prompt プロンプト
    * @param model 使用するモデル（未指定時は選択中のモデル）
+   * @returns 生成テキスト
    */
   const generateTextWithModel = async (prompt: string, model?: string): Promise<string> => {
     const modelToUse = model || selectedModel;
@@ -86,6 +145,7 @@ export const useAIModel = () => {
 
   /**
    * 選択中モデルでテキスト生成を行います。
+   * @param prompt プロンプト
    */
   const generateText = async (prompt: string): Promise<string> => generateTextWithModel(prompt, selectedModel);
 
@@ -102,6 +162,11 @@ export const useAIModel = () => {
 
   /**
    * 1人のAI参加者の応答を生成します。
+   * @param participantName 参加者の表示名
+   * @param role 役割（例: "批判的思考の専門家"）
+   * @param description 口調・行動方針などの説明
+   * @param conversationHistory 直近履歴（必要なら要約を含む）
+   * @param discussionTopic 議論テーマ
    */
   const generateAIResponse = async (
     participantName: string,
@@ -128,6 +193,9 @@ export const useAIModel = () => {
 
   /**
    * 議論全体の要約を生成します（初回フル）。
+   * @param discussionTopic テーマ
+   * @param conversationHistory 履歴テキスト（全量）
+   * @param participants 参加者名の配列（"ユーザー" を含むことがあります）
    */
   const summarizeDiscussion = async (
     discussionTopic: string,
@@ -150,6 +218,10 @@ export const useAIModel = () => {
 
   /**
    * 直近の追加発言のみを反映したインクリメンタル要約を生成します。
+   * @param discussionTopic テーマ
+   * @param previousSummary 直前の要約
+   * @param newMessages 追加分の発言テキスト
+   * @param participants 参加者名の配列
    */
   const incrementalSummarizeDiscussion = async (
     discussionTopic: string,
@@ -174,6 +246,9 @@ export const useAIModel = () => {
 
   /**
    * 論点や立場など、議論の分析情報（JSON文字列）を生成します。
+   * @param discussionTopic テーマ
+   * @param conversationHistory 履歴テキスト（要約+直近など）
+   * @param participants 参加者名の配列
    */
   const analyzeDiscussionPoints = async (
     discussionTopic: string,
@@ -199,6 +274,7 @@ export const useAIModel = () => {
    * @param discussionTopic テーマ
    * @param desiredCount 生成数（既定: 4）
    * @param styleHint 文体・役割のヒント
+   * @returns name/role/description を持つプロフィール配列
    */
   const generateAIProfiles = async (
     discussionTopic: string,

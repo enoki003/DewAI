@@ -1,6 +1,15 @@
+/**
+ * @packageDocumentation
+ * ホームページ。アプリのエントリポイントとして、DewAI の概要と開始導線（Startページ）を提供します。
+ */
+
 import { useNavigate } from 'react-router-dom';
 import { Button, VStack, Heading, Text } from '@chakra-ui/react';
 
+/**
+ * アプリのトップ画面。
+ * 「始める」ボタンで設定/開始フローへ誘導します。
+ */
 function Home() {
     const navigate = useNavigate();
     

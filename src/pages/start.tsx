@@ -1,7 +1,19 @@
+/**
+ * @packageDocumentation
+ * 開始ページ（Start）。Ollama接続状態の表示と、
+ * - 新規議論の開始（Configへ遷移）
+ * - 保存済み議論の再開（Sessionsへ遷移）
+ * の導線を提供します。
+ */
+
 import { useNavigate } from 'react-router-dom';
 import { Button, VStack, Heading, Text, Badge, HStack } from '@chakra-ui/react';
 import { useAIModel } from '../hooks/useAIModel';
 
+/**
+ * 開始方法の選択画面。
+ * 接続状態に応じてボタンの活性を切り替えます。
+ */
 function Start() {
     const navigate = useNavigate();
     const { isModelLoaded } = useAIModel();
