@@ -1,10 +1,10 @@
-"/**
+/**
  * @packageDocumentation
  * トースト通知コンポーネント。
  * Chakra UI のToasterを使用して、画面右下にトースト通知を表示します。
  */
 
-"use client""
+"use client"
 
 import {
   Toaster as ChakraToaster,

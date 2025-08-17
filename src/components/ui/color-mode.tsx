@@ -1,10 +1,10 @@
-"/**
+/**
  * @packageDocumentation
  * カラーモード（ライト/ダーク）の管理とUIコンポーネント。
  * next-themes ライブラリをラップして、カラーモードの切り替えと状態管理を提供します。
  */
 
-"use client""
+"use client"
 
 import type { IconButtonProps, SpanProps } from "@chakra-ui/react"
 import { ClientOnly, IconButton, Skeleton, Span } from "@chakra-ui/react"
@@ -124,14 +124,6 @@ export const DarkMode = React.forwardRef<HTMLSpanElement, SpanProps>(
         display="contents"
         className="chakra-theme dark"
         colorPalette="gray"
-        colorScheme="dark"
-        ref={ref}
-        {...props}
-      />
-    )
-  },
-)
-Palette="gray"
         colorScheme="dark"
         ref={ref}
         {...props}

@@ -41,10 +41,4 @@ function App() {
   );
 }
 
-export default App;oute path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Suspense>
-  );
-}
-
 export default App;
