@@ -13,7 +13,9 @@
     "dev:docker": "docker-compose up",
     "dev:docker-build": "docker-compose up --build",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "docs:api": "typedoc",
+    "docs:preview": "npx serve -l 5050 docs"
   },
   "dependencies": {
     "@chakra-ui/card": "^2.2.0",
@@ -45,6 +47,7 @@
     "@vitejs/plugin-react": "^4.4.1",
     "autoprefixer": "^10.4.21",
     "postcss": "^8.5.3",
+    "typedoc": "^0.28.10",
     "typescript": "~5.6.2",
     "vite": "^6.2.3",
     "vitest": "^3.2.4"

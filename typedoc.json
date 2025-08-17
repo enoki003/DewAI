@@ -1,0 +1,17 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["src"],
+  "tsconfig": "tsconfig.json",
+  "out": "docs/api",
+  "exclude": [
+    "src-tauri/**",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/__tests__/**"
+  ],
+  "includeVersion": true,
+  "categorizeByGroup": true,
+  "readme": "README.md",
+  "gitRevision": "master",
+  "entryPointStrategy": "expand"
+}
