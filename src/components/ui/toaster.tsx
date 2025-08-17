@@ -1,4 +1,10 @@
-"use client"
+"/**
+ * @packageDocumentation
+ * トースト通知コンポーネント。
+ * Chakra UI のToasterを使用して、画面右下にトースト通知を表示します。
+ */
+
+"use client""
 
 import {
   Toaster as ChakraToaster,
@@ -19,6 +25,8 @@ export const toaster = createToaster({
 
 /**
  * 画面右下にトーストを描画するコンポーネント。
+ * アプリのルートプロバイダーに配置して使用します。
+ * @returns トースト表示用のコンポーネント
  */
 export const Toaster = () => {
   return (

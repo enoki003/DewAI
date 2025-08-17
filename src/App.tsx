@@ -10,13 +10,21 @@ const Play = lazy(() => import('./pages/play'));
 const Sessions = lazy(() => import('./pages/sessions'));
 const Database = lazy(() => import('./pages/database'));
 
-// ローディングコンポーネント
+/**
+ * 遅延読み込み中に表示するローディングコンポーネント。
+ * @returns 全画面中央にスピナーを表示するVStack
+ */
 const LoadingSpinner = () => (
   <VStack justify="center" align="center" height="100vh">
     <Spinner size="lg" />
   </VStack>
 );
 
+/**
+ * メインアプリケーションコンポーネント。
+ * React Router によるルーティングと Suspense による遅延読み込みを提供します。
+ * @returns ルートコンポーネント
+ */
 function App() {
   return (
     <Suspense fallback={<LoadingSpinner />}>
@@ -28,6 +36,12 @@ function App() {
         <Route path="/config" element={<Config />} />
         <Route path="/play" element={<Play />} />
         <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
+  );
+}
+
+export default App;oute path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>
   );

@@ -1,3 +1,9 @@
+/**
+ * @packageDocumentation
+ * 確認ダイアログコンポーネント。
+ * 削除などの破壊的操作の前に、ユーザーに確認を求めるダイアログを表示します。
+ */
+
 import React, { useState } from 'react';
 import {
   Button,
@@ -28,7 +34,12 @@ export interface ConfirmDialogProps {
 }
 
 /**
- * 汎用的な確認ダイアログ。
+ * 汎用的な確認ダイアログコンポーネント。
+ * トリガー要素をクリックするとダイアログが開き、
+ * ユーザーの確認後に指定された処理を実行します。
+ * 
+ * @param props - ConfirmDialogProps
+ * @returns 確認ダイアログコンポーネント
  */
 export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   trigger,

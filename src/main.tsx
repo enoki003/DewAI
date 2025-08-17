@@ -1,3 +1,9 @@
+/**
+ * @packageDocumentation
+ * アプリケーションのエントリーポイント。
+ * React DOM にルートコンポーネントをマウントし、HashRouter とUI Provider を設定します。
+ */
+
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
