@@ -1,5 +1,8 @@
-// アラート・通知コンポーネント
-// セッション削除、分析エラー等の操作結果を適切に表示
+/**
+ * @packageDocumentation
+ * アラート・通知コンポーネント。
+ * セッション削除、分析エラー等の操作結果を適切に表示するためのユーティリティ関数群。
+ */
 
 import { Alert } from "@chakra-ui/react"
 import { toaster } from "./toaster"
@@ -8,17 +11,23 @@ import { LuCheck, LuTriangleAlert, LuX, LuInfo } from "react-icons/lu"
 /** 通知の種類 */
 export type AlertType = "success" | "warning" | "error" | "info"
 
-/** showNotification のオプション */
+/** showNotification のオプション設定 */
 export interface NotificationOptions {
+  /** 通知の種類 */
   type: AlertType
+  /** 通知のタイトル */
   title: string
+  /** 通知の詳細説明（省略可） */
   description?: string
+  /** 表示継続時間（ミリ秒、既定: 5000） */
   duration?: number
+  /** 閉じるボタンの表示可否（既定: true） */
   isClosable?: boolean
 }
 
 /**
  * Chakra Toaster を使って通知を表示します。
+ * @param options - 通知の設定オプション
  */
 export const showNotification = (options: NotificationOptions) => {
   const { type, title, description, duration = 5000, isClosable = true } = options
@@ -64,7 +73,10 @@ export const showSessionSaveSuccess = (sessionTopic: string, isUpdate: boolean =
   })
 }
 
-/** セッション保存 エラー */
+/**
+ * セッション保存エラーの通知を表示します。
+ * @param error - エラーメッセージ
+ */
 export const showSessionSaveError = (error: string) => {
   showNotification({
     type: "error",
@@ -74,7 +86,9 @@ export const showSessionSaveError = (error: string) => {
   })
 }
 
-/** 参加者情報更新 成功 */
+/**
+ * 参加者情報更新成功の通知を表示します。
+ */
 export const showParticipantsUpdateSuccess = () => {
   showNotification({
     type: "success",
@@ -102,7 +116,11 @@ export const showAnalysisSuccess = () => {
   })
 }
 
-/** 分析 エラー */
+/**
+ * 分析処理エラーの通知を表示します。
+ * @param analysisType - 分析の種類（「議論」等）
+ * @param error - エラーメッセージ
+ */
 export const showAnalysisError = (analysisType: string, error: string) => {
   showNotification({
     type: "error",
@@ -112,7 +130,10 @@ export const showAnalysisError = (analysisType: string, error: string) => {
   })
 }
 
-/** AI応答 生成情報 */
+/**
+ * AI応答生成成功の通知を表示します。
+ * @param name - 応答を生成したAI参加者の名前
+ */
 export const showAIResponseGenerated = (name: string) => {
   showNotification({
     type: "info",
@@ -121,7 +142,11 @@ export const showAIResponseGenerated = (name: string) => {
   })
 }
 
-/** AI応答 エラー */
+/**
+ * AI応答生成エラーの通知を表示します。
+ * @param participantName - エラーが発生したAI参加者の名前
+ * @param error - エラーメッセージ
+ */
 export const showAIResponseError = (participantName: string, error: string) => {
   showNotification({
     type: "error",
@@ -131,7 +156,11 @@ export const showAIResponseError = (participantName: string, error: string) => {
   })
 }
 
-/** 入力が長過ぎる場合の警告 */
+/**
+ * 入力文字数が制限を超えた場合の警告を表示します。
+ * @param current - 現在の文字数
+ * @param max - 最大文字数制限（既定: 10000）
+ */
 export const showInputTooLongWarning = (current: number, max = 10000) => {
   showNotification({
     type: "warning",
@@ -141,7 +170,9 @@ export const showInputTooLongWarning = (current: number, max = 10000) => {
   })
 }
 
-/** Ollama接続エラー */
+/**
+ * Ollama接続エラーの警告を表示します。
+ */
 export const showOllamaConnectionError = () => {
   showNotification({
     type: "warning",
@@ -151,7 +182,9 @@ export const showOllamaConnectionError = () => {
   })
 }
 
-/** モデル準備完了通知 */
+/**
+ * AIモデル準備完了の通知を表示します。
+ */
 export const showModelLoadSuccess = () => {
   showNotification({
     type: "success",
@@ -161,7 +194,10 @@ export const showModelLoadSuccess = () => {
   })
 }
 
-/** モデル切替通知 */
+/**
+ * モデル切替完了の通知を表示します。
+ * @param model - 切り替え後のモデル名
+ */
 export const showModelChangeNotice = (model: string) => {
   showNotification({
     type: "info",
@@ -171,7 +207,9 @@ export const showModelChangeNotice = (model: string) => {
   })
 }
 
-/** セッション再開ヒント */
+/**
+ * セッション復元完了のヒントを表示します。
+ */
 export const showSessionResumeHint = () => {
   showNotification({
     type: "info",
@@ -181,7 +219,11 @@ export const showSessionResumeHint = () => {
   })
 }
 
-/** 汎用警告 */
+/**
+ * 汎用的な警告通知を表示します。
+ * @param title - 警告のタイトル
+ * @param description - 警告の詳細説明（省略可）
+ */
 export const showGenericWarning = (title: string, description?: string) => {
   showNotification({
     type: "warning",
@@ -191,7 +233,11 @@ export const showGenericWarning = (title: string, description?: string) => {
   })
 }
 
-/** 汎用エラー */
+/**
+ * 汎用的なエラー通知を表示します。
+ * @param title - エラーのタイトル
+ * @param description - エラーの詳細説明（省略可）
+ */
 export const showGenericError = (title: string, description?: string) => {
   showNotification({
     type: "error",
@@ -201,16 +247,25 @@ export const showGenericError = (title: string, description?: string) => {
   })
 }
 
-/** インライン Alert コンポーネント（ページ内に埋め込み表示用） */
+/** ページ内に表示するインラインアラートのプロパティ */
 export interface InlineAlertProps {
+  /** アラートの種類 */
   type: AlertType
+  /** アラートのタイトル */
   title: string
+  /** アラートの詳細説明（省略可） */
   description?: string
+  /** 閉じるボタンクリック時の処理（省略可） */
   onClose?: () => void
+  /** アラートの表示スタイル（既定: "surface"） */
   variant?: "subtle" | "surface" | "outline" | "solid"
 }
 
-/** ページ内で使う軽量なアラート表示 */
+/**
+ * ページ内で使用する軽量なアラート表示コンポーネント。
+ * @param props - InlineAlertProps
+ * @returns インラインアラートコンポーネント
+ */
 export const InlineAlert = ({ 
   type, 
   title, 

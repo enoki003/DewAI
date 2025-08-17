@@ -1,17 +1,38 @@
+/**
+ * @packageDocumentation
+ * 議論分析パネル。Playページで生成された `DiscussionAnalysis` を視覚的に表示し、
+ * 必要に応じて再分析（最新分析の実行）をトリガーできるUIを提供します。
+ */
+
 import { Box, HStack, Text, Badge, Button } from '@chakra-ui/react';
 import { DiscussionAnalysis } from './PlayTypes';
 
+/**
+ * `AnalysisPanel` の受け渡しプロパティ。
+ */
+export interface AnalysisPanelProps {
+  /** 分析結果（未実行時は null） */
+  analysis: DiscussionAnalysis | null;
+  /** 分析実行中フラグ（ボタンの活性状態と表示に利用） */
+  analyzing: boolean;
+  /** 分析の再実行ハンドラ（最新状態での再解析を呼び出す） */
+  onRefresh: () => void;
+  /** 再分析が可能か（メッセージが十分に存在する等の条件を満たすと true） */
+  canRefresh: boolean;
+}
+
+/**
+ * 議論分析結果を表示するパネル。
+ *
+ * - 主要論点/各参加者の立場/主な対立点/共通認識/未探索の論点 をカード/バッジで表示
+ * - `canRefresh=true` のときに「最新分析を実行」ボタンを表示
+ */
 export function AnalysisPanel({
   analysis,
   analyzing,
   onRefresh,
   canRefresh,
-}: {
-  analysis: DiscussionAnalysis | null;
-  analyzing: boolean;
-  onRefresh: () => void;
-  canRefresh: boolean;
-}) {
+}: AnalysisPanelProps) {
   return (
     <>
       <HStack justify="space-between" align="center" mb={3}>
@@ -84,7 +105,7 @@ export function AnalysisPanel({
           )}
 
           {analysis.commonGround && analysis.commonGround.length > 0 && (
-            <Box mb={4}>
+            <Box>
               <Text fontSize="md" fontWeight="bold" mb={2} color="green.fg">🤝 共通認識</Text>
               {analysis.commonGround.map((common, index) => (
                 <Box key={index} mb={2} p={3} bg="green.subtle" borderRadius="md" borderLeft="4px solid" borderColor="green.solid">

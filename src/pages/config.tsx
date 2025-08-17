@@ -1,3 +1,9 @@
+/**
+ * @packageDocumentation
+ * 設定ページ（Config）。議論テーマ、AI参加者（人数/名前/役職/説明）,
+ * モデル選択、ユーザー参加可否などを設定し、Playページへ遷移するための画面を提供します。
+ */
+
 import React from "react";
 import { useNavigate } from 'react-router-dom';
 import {
@@ -27,6 +33,15 @@ import {
 import { useAIModel } from '../hooks/useAIModel';
 import { showGenericError } from '../components/ui/notifications';
 
+/**
+ * 設定フォームを表示するコンポーネント。
+ *
+ * - AIモデルの選択
+ * - 参加AI数の指定と各プロフィール入力（自動補完対応）
+ * - ユーザーが議論に参加するかの選択
+ * - 議論テーマの入力
+ * - 入力検証後に設定を localStorage へ保存し、Playへ遷移
+ */
 function Config() {
   const { selectedModel, changeModel, isModelLoaded, generateAIProfiles } = useAIModel();
   const [botCount, setBotCount] = React.useState(1);
@@ -36,6 +51,7 @@ function Config() {
 
   const navigate = useNavigate();
 
+  /** AI参加者の単一プロフィール */
   interface BotProfile {
     name: string;
     role: string;
@@ -50,6 +66,9 @@ function Config() {
     setAutoLoading(prev => Array.from({ length: bots.length }, (_, i) => prev[i] ?? false));
   }, [bots.length]);
 
+  /**
+   * 参加AI数の決定。最小1〜最大10にクランプし、入力フォームを展開します。
+   */
   const handleSubmit = () => {
     const validCount = isNaN(botCount) || botCount === undefined ? 1 : botCount;
     const count = Math.min(Math.max(validCount, 1), 10);
@@ -57,7 +76,10 @@ function Config() {
     setShowFields(true);
   };
 
-  // 単一カードを自動補完
+  /**
+   * 個別カードの自動補完（LLMでプロフィールを生成）。
+   * テーマが必要、かつ Ollama 接続が必須です。
+   */
   const autoFillCard = async (index: number) => {
     try {
       if (!discussionTopic.trim()) {
@@ -270,6 +292,7 @@ function Config() {
         </VStack>
       )}
 
+      {/* 参加可否/開始ボタン */}
       <VStack gap={6} width="100%" maxW="2xl">
         <FieldRoot>
           <CheckboxRoot

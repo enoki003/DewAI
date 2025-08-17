@@ -1,3 +1,9 @@
+/**
+ * @packageDocumentation
+ * アプリケーション全体のChakra UI プロバイダーと
+ * テーマ・カラーモード・トースト通知のセットアップを行います。
+ */
+
 'use client'
 
 import { 
@@ -10,7 +16,10 @@ import { ColorModeProvider } from './color-mode'
 import { Toaster } from './toaster'
 
 /**
- * アプリ全体のChakra UI Providerとカラーモード/トーストのセットアップ。
+ * アプリケーション全体のテーマシステム設定。
+ * - グローバルカラーパレット: グリーン
+ * - ブランドカラーのセマンティックトークン定義
+ * - 角丸のセマンティックトークン定義
  */
 const system = createSystem(defaultConfig, {
   globalCss: {
@@ -37,7 +46,14 @@ const system = createSystem(defaultConfig, {
   },
 })
 
-/** ルートプロバイダ。アプリを包んでテーマ/通知を提供します。 */
+/**
+ * アプリケーション全体のルートプロバイダー。
+ * ChakraProvider, ColorModeProvider, Toaster を統合し、
+ * アプリを包んでテーマと通知機能を提供します。
+ * 
+ * @param props - children を含むプロパティ
+ * @returns 設定されたプロバイダーでラップされたコンポーネント
+ */
 export const Provider = (props: PropsWithChildren) => (
   <ChakraProvider value={system}>
     <ColorModeProvider>

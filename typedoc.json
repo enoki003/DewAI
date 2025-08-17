@@ -13,5 +13,19 @@
   "categorizeByGroup": true,
   "readme": "README.md",
   "gitRevision": "master",
-  "entryPointStrategy": "expand"
+  "entryPointStrategy": "expand",
+  "highlightLanguages": [
+    "ts",
+    "tsx",
+    "js",
+    "jsx",
+    "json",
+    "bash",
+    "sh",
+    "powershell",
+    "batch",
+    "toml",
+    "rust",
+    "md"
+  ]
 }
