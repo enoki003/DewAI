@@ -272,36 +272,8 @@ const PlayPage: React.FC = () => {
               // 最近開いたセッションを更新
               try { await updateSessionLastOpened(parsed.sessionId); } catch (e) { console.warn('[resume] last_opened_at 更新失敗:', e); }
 
-              // // 発言者の決定
-
-              // setTurnCount(saved.length);
-              // if (saved.length > 0) {
-              //   const last = saved[saved.length - 1];
-              //   const lastSpeaker = last.speaker;
-              //   if (lastSpeaker === 'ユーザー') {
-              //     setTurnIndex(1);
-              //     setAwaitingAIResume(true);
-              //   } else {
-              //     const aiNames = bots.map(b => b.name);
-              //     const idx = aiNames.indexOf(lastSpeaker);
-              //     if (idx >= 0 && idx < aiNames.length - 1) {
-              //       setTurnIndex(idx + 2);
-              //       setAwaitingAIResume(true);
-              //     } else {
-              //       const next = userParticipates ? 0 : 1;
-              //       setTurnIndex(next);
-              //       if (next > 0) setAwaitingAIResume(true);
-              //     }
-              //   }
-              // } else {
-              //   const initial = userParticipates ? 0 : 1;
-              //   setTurnIndex(initial);
-              //   if (initial > 0) setAwaitingAIResume(true);
-
-              // }
-
-
               // 発言者の決定
+              //modを使って数学的に次のターンを決定。最後のターンから次のターンの人数を予測。
                 setTurnCount(saved.length);
 
                 const botCount = bots.length;
@@ -377,7 +349,8 @@ const PlayPage: React.FC = () => {
    * `turnIndex` の強調色判定にも利用。
    */
   const displayParticipants = config ? [
-    ...(config.participate ? [{ name: 'あなた', role: 'あなた', description: '議論の参加者' }] : []),
+    //スプレッド構文とかいうやつ
+    ...(config.participate ? [{ name: 'あなた', role: '参加者', description: 'ユーザ' }] : []),
     ...config.aiData
   ] : [];
 
@@ -387,7 +360,11 @@ const PlayPage: React.FC = () => {
    */
   const startSession = async () => {
     if (isSavingSession) { console.log('[session] 保存中のため開始を待機'); return; }
-    if (!isModelLoaded) { console.log('[session] モデル未接続'); showOllamaConnectionError(); return; }
+    if (!isModelLoaded) { 
+      console.log('[session] モデル未接続'); 
+      showOllamaConnectionError(); 
+      return; 
+    }
 
     // 新規時はセッションIDをリセット
     if (!isResumed) {
@@ -413,7 +390,11 @@ const PlayPage: React.FC = () => {
    */
   const continueAIResponse = async () => {
     if (isSavingSession) { console.log('[session] 保存中のため続行待機'); return; }
-    if (!isModelLoaded) { console.log('[session] モデル未接続'); showOllamaConnectionError(); return; }
+    if (!isModelLoaded) { 
+      console.log('[session] モデル未接続'); 
+      showOllamaConnectionError(); 
+      return; 
+    }
     setAwaitingAIResume(false);
     try { await runAITurn(); } catch (e) { console.error('[ai] 続行失敗:', e); showAIResponseError('AI参加者', `${e}`); }
   };
@@ -530,7 +511,7 @@ const PlayPage: React.FC = () => {
    */
   const analyzeIfNeeded = async () => {
     if (!config || turnCount % 3 !== 0 || turnCount === 0 || messages.length < 3) return;
-    // 直近と同一内容ならスキップ（無駄な再分析防止）
+    // 直近と同一内容ならスキップ
     if (messages.length <= lastAnalyzedCount) return;
     await runAnalysis();
   };
