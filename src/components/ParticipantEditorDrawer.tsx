@@ -1,8 +1,12 @@
 /**
- * 参加者（AI）プロフィール編集用のドロワーコンポーネント。
- * - 名前 / 役職 / 説明 を編集
- * - ユーザー参加の有無
- * - 複数AIの追加/削除
+ * @packageDocumentation
+ * 参加者編集ドロワーコンポーネント。
+ * 
+ * 議論の参加者（AI・ユーザー）の設定を編集するためのドロワーUIを提供します。
+ * - 複数AI参加者のプロフィール編集（名前・役職・説明）
+ * - ユーザー参加の有無設定
+ * - タブ形式でのAI切り替え
+ * - 動的なAI追加/削除
  */
 import React, { useState, useEffect } from 'react';
 import { 
@@ -25,33 +29,78 @@ import {
   showGenericError
 } from './ui/notifications';
 
-/** AI参加者のプロフィール */
+/** 
+ * AI参加者のプロフィール情報。
+ * 議論における各AIの役割と性格を定義します。
+ */
 export interface BotProfile {
+  /** AI参加者の表示名（例: "分析家ボット"） */
   name: string;
+  /** 役割や肩書き（例: "批判的思考の専門家"） */
   role: string;
+  /** ふるまい・口調・専門領域などの詳細説明 */
   description: string;
 }
 
-/** ParticipantEditorDrawer のプロパティ */
+/** 
+ * ParticipantEditorDrawer コンポーネントのプロパティ。
+ * 参加者編集ドロワーの動作設定を定義します。
+ */
 export interface ParticipantEditorDrawerProps {
   /** ドロワーの開閉状態 */
   open: boolean;
-  /** 閉じる要求時に呼ばれる */
+  /** ドロワーを閉じる際のコールバック */
   onClose: () => void;
-  /** 編集対象の初期AI配列 */
+  /** 編集対象となる初期AI参加者配列 */
   initialBots: BotProfile[];
-  /** ユーザーが議論に参加するか */
+  /** ユーザーが議論に参加するかの初期値 */
   initialUserParticipates: boolean;
-  /** 保存ハンドラ。正しく保存できれば resolve すること */
+  /** 
+   * 保存処理のコールバック。
+   * 成功時は resolve、失敗時は reject してください。
+   * @param bots 編集後のAI参加者配列
+   * @param userParticipates ユーザー参加の可否
+   */
   onSave: (bots: BotProfile[], userParticipates: boolean) => Promise<void> | void;
-  /** 追加できるAIの最大数（既定: 5） */
+  /** 追加できるAI参加者の最大数（既定: 5） */
   maxBots?: number;
-  /** ヘッダータイトル */
+  /** ドロワーのヘッダータイトル（既定: "AI参加者の編集"） */
   title?: string;
 }
 
 /**
- * 参加者編集ドロワー。
+ * 参加者編集ドロワーコンポーネント。
+ * 
+ * 議論に参加するAI・ユーザーの設定を編集するためのドロワーUIです。
+ * 機能：
+ * - 複数AI参加者のプロフィール編集（名前・役職・説明文）
+ * - タブ形式でのAI切り替え操作
+ * - AI参加者の動的追加・削除
+ * - ユーザー参加可否の設定
+ * - 入力検証とエラーハンドリング
+ * 
+ * @param props - コンポーネントのプロパティ
+ * @returns 参加者編集ドロワー要素
+ * 
+ * @example
+ * ```tsx
+ * const [isOpen, setIsOpen] = useState(false);
+ * const [bots, setBots] = useState<BotProfile[]>([]);
+ * 
+ * <ParticipantEditorDrawer
+ *   open={isOpen}
+ *   onClose={() => setIsOpen(false)}
+ *   initialBots={bots}
+ *   initialUserParticipates={true}
+ *   onSave={async (newBots, userParticipates) => {
+ *     // 保存処理
+ *     setBots(newBots);
+ *     setIsOpen(false);
+ *   }}
+ *   maxBots={4}
+ *   title="議論参加者の設定"
+ * />
+ * ```
  */
 export const ParticipantEditorDrawer: React.FC<ParticipantEditorDrawerProps> = ({
   open,
@@ -76,6 +125,12 @@ export const ParticipantEditorDrawer: React.FC<ParticipantEditorDrawerProps> = (
     }
   }, [open, initialBots, initialUserParticipates]);
 
+  /**
+   * AI参加者の特定フィールドを更新します。
+   * @param index 更新対象のAIインデックス
+   * @param field 更新するフィールド名
+   * @param value 新しい値
+   */
   const updateBotField = (index: number, field: keyof BotProfile, value: string) => {
     setEditingBots(prev => {
       const next = [...prev];
@@ -84,6 +139,10 @@ export const ParticipantEditorDrawer: React.FC<ParticipantEditorDrawerProps> = (
     });
   };
 
+  /**
+   * 新しいAI参加者を追加します。
+   * 最大数に達している場合はエラーメッセージを表示します。
+   */
   const addBot = () => {
     setEditingBots(prev => {
       if (prev.length >= maxBots) {
@@ -96,6 +155,11 @@ export const ParticipantEditorDrawer: React.FC<ParticipantEditorDrawerProps> = (
     });
   };
 
+  /**
+   * 指定されたインデックスのAI参加者を削除します。
+   * 最低1名は残すように制限されています。
+   * @param index 削除対象のAIインデックス
+   */
   const removeBot = (index: number) => {
     setEditingBots(prev => {
       if (prev.length <= 1) return prev; // 最低1件は残す（従来仕様）
@@ -106,6 +170,12 @@ export const ParticipantEditorDrawer: React.FC<ParticipantEditorDrawerProps> = (
     });
   };
 
+  /**
+   * 入力検証を行い、参加者情報を保存します。
+   * - AI名の必須チェック
+   * - テキストのトリミング
+   * - 成功/失敗時の通知表示
+   */
   const handleSave = async () => {
     if (saving) return;
     // バリデーション

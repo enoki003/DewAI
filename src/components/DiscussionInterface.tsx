@@ -1,6 +1,12 @@
 /**
- * シンプルな議論UIコンポーネント。
- * メッセージ履歴と入力欄、送信/自動生成ボタンを提供します。
+ * @packageDocumentation
+ * 議論インターフェースコンポーネント。
+ * 
+ * リアルタイムな議論のためのUIコンポーネントを提供します。
+ * - メッセージ履歴の表示（時系列順、ユーザー/AI区別）
+ * - テキスト入力エリア
+ * - 送信/自動生成ボタン
+ * - 処理中状態の表示
  */
 import React from 'react';
 import { 
@@ -14,34 +20,73 @@ import {
   Badge 
 } from '@chakra-ui/react';
 
-/** メッセージの最小構造 */
+/** 
+ * 議論メッセージの最小構造。
+ * UIでの表示とデータ管理に必要な情報を含みます。
+ */
 export interface DiscussionMessage {
+  /** 発言者名（"ユーザー" または AI の名前） */
   speaker: string;
+  /** メッセージ本文（最大1万文字程度を想定） */
   message: string;
+  /** ユーザーの発言かどうか（UIスタイリングに使用） */
   isUser: boolean;
+  /** 発言時刻（表示用） */
   timestamp: Date;
 }
 
-/** DiscussionInterface コンポーネントのプロパティ */
+/** 
+ * DiscussionInterface コンポーネントのプロパティ。
+ * 議論インターフェースの動作を制御するための設定項目です。
+ */
 export interface DiscussionInterfaceProps {
-  /** 表示するメッセージ一覧 */
+  /** 表示するメッセージ一覧（時系列順） */
   messages: DiscussionMessage[];
-  /** 入力中テキスト */
+  /** 現在入力中のテキスト */
   currentInput: string;
-  /** 入力テキスト変更時に呼ばれる */
+  /** 
+   * 入力テキスト変更時のコールバック
+   * @param value 新しい入力値
+   */
   onInputChange: (value: string) => void;
-  /** 入力内容を送信 */
+  /** ユーザーが入力内容を送信する際のコールバック */
   onSendMessage: () => void;
-  /** 次のAI発言を生成 */
+  /** 次のAI発言を生成する際のコールバック */
   onGenerateNext: () => void;
-  /** 議論が開始済みか */
+  /** 議論が開始済みかどうかの状態 */
   discussionStarted: boolean;
-  /** 処理中スピナー表示制御 */
+  /** 処理中（AI生成中など）の状態。true時はボタンが無効化される */
   isProcessing: boolean;
 }
 
 /**
- * メッセージリストと入力欄を持つ議論インターフェース。
+ * メッセージリストと入力欄を持つ議論インターフェースコンポーネント。
+ * 
+ * リアルタイムな議論のためのUIを提供します。特徴：
+ * - メッセージ履歴の可視化（スクロール可能、ユーザー/AI区別）
+ * - リアルタイム入力欄
+ * - 送信/AI生成ボタン
+ * - 処理中状態の適切な表示
+ * 
+ * @param props - コンポーネントのプロパティ
+ * @returns 議論インターフェース要素
+ * 
+ * @example
+ * ```tsx
+ * const [messages, setMessages] = useState<DiscussionMessage[]>([]);
+ * const [input, setInput] = useState('');
+ * const [processing, setProcessing] = useState(false);
+ * 
+ * <DiscussionInterface
+ *   messages={messages}
+ *   currentInput={input}
+ *   onInputChange={setInput}
+ *   onSendMessage={() => handleSend(input)}
+ *   onGenerateNext={() => handleAIGenerate()}
+ *   discussionStarted={messages.length > 0}
+ *   isProcessing={processing}
+ * />
+ * ```
  */
 export const DiscussionInterface: React.FC<DiscussionInterfaceProps> = ({
   messages,

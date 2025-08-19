@@ -32,36 +32,100 @@ export interface DiscussionMessage {
   timestamp: Date;
 }
 
-/** 分析結果の構造 */
+/** 
+ * 議論の分析結果データ構造。
+ * AI分析により生成される包括的な議論分析情報を格納します。
+ */
 export interface AnalysisResult {
-  mainPoints: { point: string; description: string }[];
-  participantStances: { 
-    participant: string; 
-    stance: string; 
-    keyArguments: string[] 
-  }[];
-  conflicts: { 
-    issue: string; 
-    sides: string[]; 
+  /** 
+   * 主な論点の配列。
+   * 議論で取り上げられた重要なポイントとその説明。
+   */
+  mainPoints: { 
+    /** 論点の要約 */
+    point: string; 
+    /** 論点の詳細説明 */
     description: string 
   }[];
+  
+  /** 
+   * 参加者ごとの立場や主張。
+   * 各参加者の意見の立ち位置を整理したもの。
+   */
+  participantStances: { 
+    /** 参加者名（"ユーザー" または AI名） */
+    participant: string; 
+    /** その参加者の立場・主張の要約 */
+    stance: string; 
+    /** 立場を支える主要な論拠の配列 */
+    keyArguments: string[] 
+  }[];
+  
+  /** 
+   * 争点や対立箇所。
+   * 参加者間で意見が分かれている論点の詳細。
+   */
+  conflicts: { 
+    /** 対立している具体的論点 */
+    issue: string; 
+    /** 代表的な立場の側（例: "賛成", "慎重論" など） */
+    sides: string[]; 
+    /** 対立の背景や補足説明 */
+    description: string 
+  }[];
+  
+  /** 
+   * 進行状況の評価。
+   * 議論の現状と今後の方向性に関する分析。
+   */
   progressAssessment: {
+    /** 全体的な進行状況の評価 */
     overallProgress: string;
+    /** 今後の議論で取り組むべき次のステップ */
     nextSteps: string[];
+    /** 現在直面している主要な課題 */
     keyChallenges: string[];
   };
 }
 
-/** AnalysisDisplay コンポーネントのプロパティ */
+/** 
+ * AnalysisDisplay コンポーネントのプロパティ。
+ * 分析結果表示に必要なデータを定義します。
+ */
 export interface AnalysisDisplayProps {
-  /** 解析済みの議論情報。未解析時はnull */
+  /** 
+   * 解析済みの議論情報。
+   * null の場合は「分析待ち」メッセージを表示します。
+   */
   analysis: AnalysisResult | null;
-  /** 表示中セッションのメッセージ一覧（統計表示に使用） */
+  /** 
+   * 表示中セッションのメッセージ一覧。
+   * 統計情報（メッセージ数など）の表示に使用されます。
+   */
   messages: DiscussionMessage[];
 }
 
 /**
- * 議論の分析結果をカード形式で表示します。
+ * 議論の分析結果をカード形式で表示するコンポーネント。
+ * 
+ * AI分析により生成された議論の分析情報を視覚的に整理して表示します。
+ * 表示内容：
+ * - 主要な論点とその説明
+ * - 参加者ごとの立場と根拠
+ * - 対立点と争点の詳細
+ * - 進行状況評価と今後の方向性
+ * - 簡易統計情報（メッセージ数、参加者数など）
+ * 
+ * @param props - コンポーネントのプロパティ
+ * @returns 分析結果表示要素または分析待ちメッセージ
+ * 
+ * @example
+ * ```tsx
+ * <AnalysisDisplay
+ *   analysis={discussionAnalysis}
+ *   messages={allMessages}
+ * />
+ * ```
  */
 export const AnalysisDisplay: React.FC<AnalysisDisplayProps> = ({
   analysis,
