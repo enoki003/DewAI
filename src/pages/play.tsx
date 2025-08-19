@@ -125,14 +125,14 @@ const PlayPage: React.FC = () => {
   const [config, setConfig] = useState<ScreenConfig | null>(null);
   /** 表示と保存対象のメッセージ履歴（末尾が最新） */
   const [messages, setMessages] = useState<TalkMessage[]>([]);
-  /** 現在のターン（0=ユーザー、1..=AIインデックス+1） */
-  const [turnIndex, setTurnIndex] = useState(0);
   /** 入力欄のテキスト */
   const [inputText, setInputText] = useState('');
   /** AI応答生成中フラグ（多重実行の抑止） */
   const [isGenerating, setIsGenerating] = useState(false);
   /** 議論が開始されているか（開始前/進行中） */
   const [isActive, setIsActive] = useState(false);
+  /** 現在のターン（0=ユーザー、1..=AIインデックス+1） */
+const [turnIndex, setTurnIndex] = useState(0);
 
   // セッション保存関連
   /** 現在のセッションID（保存済みなら > 0） */
@@ -150,16 +150,12 @@ const PlayPage: React.FC = () => {
   const [isSavingSession, setIsSavingSession] = useState(false);
   /** 再開ヒントトーストを一度だけ出す制御 */
   const resumeHintShownRef = useRef(false);
-  /** 保存中に到着した最新版メッセージスナップショット */
-  const pendingMessagesRef = useRef<TalkMessage[] | null>(null);
 
   // 要約・分析関連
   /** 長大履歴の要約文字列（プロンプト圧縮用） */
   const [historySummary, setHistorySummary] = useState<string>('');
   /** 要約した時点のメッセージ数（差分要約トリガーの基準） */
   const [lastSummarizedIndex, setLastSummarizedIndex] = useState<number>(0);
-  /** 発言数カウンタ（ユーザー/AI問わず追加で +1） */
-  const [turnCount, setTurnCount] = useState(0);
   /** 要約実行中フラグ */
   const [summarizing, setSummarizing] = useState(false);
   /** 分析実行中フラグ */
@@ -168,8 +164,6 @@ const PlayPage: React.FC = () => {
   const [analysis, setAnalysis] = useState<DiscussionAnalysis | null>(null);
   /** 最後に分析を実行した時点のメッセージ数（開閉時の不要リクエスト抑止に使用） */
   const [lastAnalyzedCount, setLastAnalyzedCount] = useState<number>(0);
-  /** 直近保持ターン数（それ以前は `historySummary` に集約） */
-  const KEEP_RECENT_TURNS = 4; // 直近保持ターン数
 
   // UI
   /** 分析パネルの開閉状態 */
@@ -237,11 +231,53 @@ const PlayPage: React.FC = () => {
   }, [messages, scrollToBottom]);
   
   // 3ターン毎の自動分析（ユーザー/AI問わずカウント後に発火）
-  useEffect(() => {
-    analyzeIfNeeded();
-    //依存関係の警告を抑制（一時的）
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [turnCount]);
+
+useEffect(() => {
+  if (!config) return;
+  const total = messages.length;
+  if (total === 0) return;
+
+  const parts = [ ...(config.participate ? [USER_SPEAKER] : []), ...config.aiData.map(a => a.name) ];
+
+  const run = async () => {
+    setSummarizing(true);
+    try {
+      if (!historySummary) {
+        if (total >= CONFIG.MIN_INITIAL_FULL_SUMMARIZE) {
+          const history = messages.map(m => `${m.speaker}: ${m.message}`).join('\n');
+          const full = await summarizeDiscussion(config.discussionTopic, history, parts);
+          setHistorySummary(full);
+          setLastSummarizedIndex(total);
+          if (sessionId && sessionId > 0) {
+            await saveSessionAnalysis(sessionId, 'summary', JSON.stringify({ summary: full }));
+          }
+        }
+      } else {
+        const delta = total - lastSummarizedIndex;
+        if (delta >= CONFIG.MIN_INCREMENTAL_SUMMARIZE) {
+          const newSlice = messages.slice(lastSummarizedIndex).map(m => `${m.speaker}: ${m.message}`).join('\n');
+          if (newSlice) {
+            const updated = await incrementalSummarizeDiscussion(config.discussionTopic, historySummary, newSlice, parts);
+            setHistorySummary(updated);
+            setLastSummarizedIndex(total);
+            if (sessionId && sessionId > 0) {
+              await saveSessionAnalysis(sessionId, 'summary', JSON.stringify({ summary: updated, delta }));
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[summary] failed:', e);
+      showAnalysisError('議論要約', String(e));
+    } finally {
+      setSummarizing(false);
+    }
+  };
+
+  run();
+}, [config, messages, historySummary, lastSummarizedIndex, summarizeDiscussion, incrementalSummarizeDiscussion, saveSessionAnalysis, sessionId]);
+
+  useEffect(() => {analyzeIfNeeded();}, [messages,config,lastAnalyzedCount]);
   
 
 
@@ -276,7 +312,7 @@ const PlayPage: React.FC = () => {
                 throw new Error('participantsフォーマットが不正です');
               }
               const bots: BotProfile[] = participantsObj.aiData;
-              const userParticipatesFlag:boolean = participantsObj.userParticipates ?? [];//??はNull合体演算子で左辺がNullまたはundefinedなら右辺を返す
+              const userParticipatesFlag:boolean = Boolean(participantsObj.userParticipates);// ユーザー参加フラグ
               setConfig({ discussionTopic: session.topic, aiData: bots, participate: userParticipatesFlag });
 
               // 使用モデル復元
@@ -306,9 +342,6 @@ const PlayPage: React.FC = () => {
               try { await updateSessionLastOpened(parsed.sessionId); } catch (e) { console.warn('[resume] last_opened_at 更新失敗:', e); }
 
               // 発言者の決定
-              //modを使って数学的に次のターンを決定。最後のターンから次のターンの人数を予測。
-                setTurnCount(saved.length);
-
                 const botCount = bots.length;
 
                 if (saved.length === 0) {
@@ -427,12 +460,8 @@ const PlayPage: React.FC = () => {
       const next = [...messages, userMsg]; // 保存・AI用のスナップショット
       setInputText('');
       setTurnIndex(1);
-      setTurnCount(prev => prev + 1);
 
       try { await autoSaveSession(next); } catch (e) { console.warn('[save] 直後保存失敗:', e); }
-
-      await summarizeIfNeeded();
-      await analyzeIfNeeded();
 
       try {
         setAwaitingAIResume(false);
@@ -453,67 +482,7 @@ const PlayPage: React.FC = () => {
    * - 初回は一定件数以上でフル要約
    * - 以降は差分件数に応じてインクリメンタル（増分）要約
    */
-  const summarizeIfNeeded = async () => {
-    if (!config) return;
-
-    const totalMsgs = messages.length;
-    if (totalMsgs === 0) return;
-
-    // 初回: まだ summary が無い & 閾値到達
-    if (!historySummary) {
-      if (totalMsgs < CONFIG.MIN_INITIAL_FULL_SUMMARIZE) return; // まだ十分に蓄積していない
-      try {
-        const history = messages.map(m => `${m.speaker}: ${m.message}`).join('\n');// 履歴をプロンプト形式に変換
-        const parts = [ ...(config.participate ? [USER_SPEAKER] : []), ...config.aiData.map(a => a.name) ];// 参加者名リスト
-        setSummarizing(true); 
-        const full = await summarizeDiscussion(config.discussionTopic, history, parts);// フル要約を実行
-        setHistorySummary(full);
-        setLastSummarizedIndex(totalMsgs);
-        localStorage.setItem('summaryLog', JSON.stringify([{ ts: Date.now(), type: 'full', size: totalMsgs, summary: full }]));
-        if (sessionId && sessionId > 0) {
-          try { await saveSessionAnalysis(sessionId, 'summary', JSON.stringify({ summary: full })); } catch (e) { console.warn('[save] 要約保存失敗:', e); }
-        }
-      } catch (e) {
-        console.error('[summary] 初回要約失敗:', e);
-        showAnalysisError('議論要約', `${e}`);
-      } finally {
-        setSummarizing(false);
-      }
-      return;
-    }
-
-    // 以降: 追加発言差分が一定数を超えたらインクリメンタル（増分）要約
-    const delta = totalMsgs - lastSummarizedIndex;
-    if (delta < CONFIG.MIN_INCREMENTAL_SUMMARIZE) return;
-
-    try {
-      const newSlice = messages.slice(lastSummarizedIndex).map(m => `${m.speaker}: ${m.message}`).join('\n');
-      if (!newSlice) return;
-      const parts = [ ...(config.participate ? [USER_SPEAKER] : []), ...config.aiData.map(a => a.name) ];
-      setSummarizing(true);
-      const updated = await incrementalSummarizeDiscussion(config.discussionTopic, historySummary, newSlice, parts);
-      setHistorySummary(updated);
-      setLastSummarizedIndex(totalMsgs);
-      // ログ追加
-      try {
-        const raw = localStorage.getItem('summaryLog');
-        let arr: any[] = [];
-        if (raw) { try { arr = JSON.parse(raw); if (!Array.isArray(arr)) arr = []; } catch { arr = []; } }
-        arr.push({ ts: Date.now(), type: 'incremental', size: totalMsgs, delta, summary: updated });
-        // 直近50件だけ保持
-        if (arr.length > 50) arr = arr.slice(-50);
-        localStorage.setItem('summaryLog', JSON.stringify(arr));
-      } catch (e) { console.warn('[summaryLog] 保存失敗', e); }
-      if (sessionId && sessionId > 0) {
-        try { await saveSessionAnalysis(sessionId, 'summary', JSON.stringify({ summary: updated, delta })); } catch (e) { console.warn('[save] インクリメンタル要約保存失敗:', e); }
-      }
-    } catch (e) {
-      console.error('[summary] インクリメンタル失敗:', e);
-      showAnalysisError('議論要約', `${e}`);
-    } finally {
-      setSummarizing(false);
-    }
-  };
+  
 
   /**
    * 必要に応じて ANALYSIS_TURN_INTERVAL ターン毎の自動分析を実行。
@@ -521,7 +490,8 @@ const PlayPage: React.FC = () => {
    */
   const analyzeIfNeeded = async () => {
     // 条件チェック
-    if (!config || turnCount === 0) return;
+    if (!config || messages.length === 0) return;
+    const turnCount = messages.length;
     // ターン数が CONFIG.ANALYSIS_TURN_INTERVAL の倍数でない場合はスキップ
     if (turnCount % CONFIG.ANALYSIS_TURN_INTERVAL !== 0) return;
     if (messages.length < CONFIG.ANALYSIS_TURN_INTERVAL) return;
@@ -589,6 +559,7 @@ const PlayPage: React.FC = () => {
       console.error('[analysis] 実行失敗:', e);
       showAnalysisError('議論分析', `${e}`);
     } finally {
+      setLastAnalyzedCount(messages.length);
       setAnalyzing(false);
     }
   };
@@ -597,27 +568,23 @@ const PlayPage: React.FC = () => {
    * サイレント保存（多重保存時は最新版スナップショットをキューして防止処理する）。
    * 既存セッションは更新、新規は作成してIDを確定。
    */
-  const autoSaveSession = async (messagesToSave?: TalkMessage[]) => {
-    const current = messagesToSave || messages;
-    if (!config || current.length === 0) { console.log('[save] 保存対象なし'); return; }
+const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
 
-    if (isSavingSession) {
-      pendingMessagesRef.current = current;
-      console.log('[save] 保存中→最新スナップショットをキューに登録');
-      return;
-    }
-
+const enqueueSave = (snapshot: TalkMessage[]) => {
+  if (!config) return;
+  if (snapshot.length === 0) return; 
+  saveQueueRef.current = saveQueueRef.current.then(async () => {
     setIsSavingSession(true);
     try {
       const participantsData = { userParticipates: config.participate, aiData: config.aiData };
       const currentId = sessionIdRef.current;
       if (currentId && currentId > 0) {
-        await updateSession(currentId, JSON.stringify(current));
+        await updateSession(currentId, JSON.stringify(snapshot));
       } else {
         const newId = await saveSession(
           config.discussionTopic,
           JSON.stringify(participantsData),
-          JSON.stringify(current),
+          JSON.stringify(snapshot),
           selectedModel
         );
         setSessionId(newId);
@@ -628,13 +595,17 @@ const PlayPage: React.FC = () => {
       console.error('[save] 失敗:', e);
     } finally {
       setIsSavingSession(false);
-      if (pendingMessagesRef.current) {
-        const pending = pendingMessagesRef.current;
-        pendingMessagesRef.current = null;
-        await autoSaveSession(pending);
-      }
     }
-  };
+  }).catch(e => {
+    console.error('[save] queue error:', e);
+    setIsSavingSession(false);
+  });
+};
+
+const autoSaveSession = async (messagesToSave?: TalkMessage[]) => {
+  const snapshot = messagesToSave || messages;
+  enqueueSave(snapshot);
+};
 
   /**
    * 指定ターン（未指定なら現在の `turnIndex`）のAI参加者で応答を生成し、
@@ -662,7 +633,7 @@ const PlayPage: React.FC = () => {
     try {
       setIsGenerating(true);
       const base = baseMessages ?? messages;
-      const recentLines = base.slice(-KEEP_RECENT_TURNS).map(m => `${m.speaker}: ${m.message}`).join('\n');//末尾からKEEP_RECENT_TURNS件のメッセージを取得
+      const recentLines = base.slice(-CONFIG.KEEP_RECENT_TURNS).map((m: TalkMessage) => `${m.speaker}: ${m.message}`).join('\n');//末尾からKEEP_RECENT_TURNS件のメッセージを取得
       const history = historySummary ? `${historySummary}\n${recentLines}` : recentLines;
 
       const response = await generateAIResponse(bot.name, bot.role, bot.description, history, config.discussionTopic);
@@ -672,7 +643,6 @@ const PlayPage: React.FC = () => {
 
       // 関数型更新で追記（上書き防止）
       setMessages(prev => [...prev, aiMsg]);
-      setTurnCount(prev => prev + 1);
 
       nextBase = [...base, aiMsg];
       try { await autoSaveSession(nextBase); } catch (e) { console.warn('[save] 自動保存失敗:', e); }
@@ -710,7 +680,7 @@ const PlayPage: React.FC = () => {
     try {
       await autoSaveSession(messages);
       const start = Date.now();
-      while (isSavingSession || pendingMessagesRef.current) {
+      while (isSavingSession) {
         await new Promise((r) => setTimeout(r, 100));
         if (Date.now() - start > 2000) break; // 最大2秒待機
       }
@@ -796,7 +766,7 @@ const PlayPage: React.FC = () => {
           </HStack>
           <HStack gap={1} wrap="wrap" justify={{ base: "start", lg: "end" }}>
             <Badge colorPalette="green" variant="outline" size={{ base: "sm", md: "md" }}>
-              ターン: {turnCount}
+              ターン: {messages.length}
             </Badge>
             {historySummary && (
               <Badge colorPalette="green" variant="outline" size={{ base: "sm", md: "md" }}>
@@ -1000,11 +970,11 @@ const PlayPage: React.FC = () => {
               </Text>
             )}
             <VStack align="stretch" gap={2} width="100%" flex="1">
-              <Textarea value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder={!isActive ? "議論開始後に入力できます" : turnIndex === 0 && !isGenerating ? "あなたの意見や質問を入力してください..." : "他の参加者のターンです"} resize="none" rows={3} fontSize={{ base: "sm", md: "md" }} disabled={!isActive || turnIndex !== 0 || isGenerating || isSavingSession} maxLength={10000} width="100%" minWidth="100%" />
+              <Textarea value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder={!isActive ? "議論開始後に入力できます" : turnIndex === 0 && !isGenerating ? "あなたの意見や質問を入力してください..." : "他の参加者のターンです"} resize="none" rows={3} fontSize={{ base: "sm", md: "md" }} disabled={!isActive || turnIndex !== 0 || isGenerating || isSavingSession} maxLength={CONFIG.MAX_INPUT_LENGTH} width="100%" minWidth="100%" />
               
               <HStack justify="space-between">
-                <Text fontSize="xs" color="gray.500">{inputText.length}/10,000文字</Text>
-                {inputText.length > 9000 && (<Text fontSize="xs" color="orange.500">残り{10000 - inputText.length}文字</Text>)}
+                <Text fontSize="xs" color="gray.500">{inputText.length}/{CONFIG.MAX_INPUT_LENGTH}文字</Text>
+                {inputText.length > CONFIG.MAX_INPUT_LENGTH * 0.9 && (<Text fontSize="xs" color="orange.500">残り{CONFIG.MAX_INPUT_LENGTH - inputText.length}文字</Text>)}
               </HStack>
             </VStack>
             <HStack width="100%" gap={2}>
