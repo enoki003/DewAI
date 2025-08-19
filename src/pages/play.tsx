@@ -71,6 +71,30 @@ import { AnalysisPanel } from './play/AnalysisPanel';
 import { BotProfile, DiscussionAnalysis, ScreenConfig, TalkMessage } from './play/PlayTypes';
 
 /**
+ * 発言者と参加者構成に応じて、次のターンインデックスを計算する。
+ * 0 = ユーザー, 1〜 = AIインデックス + 1
+ */
+const calculateNextTurn = (
+  lastSpeaker: string,
+  bots: BotProfile[],
+  userParticipates: boolean
+) : number => {
+  const botCount = bots.length;
+  const lastBotIndex = bots.findIndex(bot => bot.name === lastSpeaker);
+  const lastSlot = lastSpeaker === 'ユーザー'? 0 : (lastBotIndex >= 0 ? lastBotIndex + 1 : 1);
+
+  if (userParticipates) {
+    // ユーザー参加時はユーザーが0、AIが1〜
+    return (lastSlot + 1) % (botCount + 1);
+  } else {
+    if(botCount === 0) return 0;
+    const boundedSlot = Math.min(Math.max(1,lastSlot),botCount);
+    return (boundedSlot % botCount) + 1;
+  }
+};
+
+
+/**
  * 議論を実行するメインページコンポーネント。
  *
  * - セッションの開始/再開/保存を管理
@@ -160,7 +184,10 @@ const PlayPage: React.FC = () => {
   /** ユーザースクロール中フラグの参照版 */
   const userScrollingRef = useRef(false);
   /** スクロール終了検知のデバウンス時間(ms) */
-  const SCROLL_END_DEBOUNCE_MS = 150; // スクロール終了検知のデバウンス時間(150ms)
+  const SCROLL_END_DEBOUNCE_MS = 150; 
+  /** 入力欄の最大文字数 */
+  // 10,000文字（Ollamaの制限に合わせる）
+  const MAX_INPUT_LENGTH = 10000;
 
   /**
    * メッセージ末尾にスクロール。
@@ -286,30 +313,30 @@ const PlayPage: React.FC = () => {
                 const lastMessage = saved[saved.length - 1];
                 const lastSpeaker = lastMessage?.speaker ?? '';
 
-                // 直前スロット s を決定（ユーザー=0、AI_k = k(1..botCount)）
-                const lastBotIndex = bots.findIndex(b => b.name === lastSpeaker); // 0-based, 見つからなければ -1
-                const lastSlot = (lastSpeaker === 'ユーザー')
-                  ? 0
-                  : (lastBotIndex >= 0 ? lastBotIndex + 1 : 1); // 未一致は AI1
+                // // 直前スロット s を決定（ユーザー=0、AI_k = k(1..botCount)）
+                // const lastBotIndex = bots.findIndex(b => b.name === lastSpeaker); // 0-based, 見つからなければ -1
+                // const lastSlot = (lastSpeaker === 'ユーザー')
+                //   ? 0
+                //   : (lastBotIndex >= 0 ? lastBotIndex + 1 : 1); // 未一致は AI1
 
-                // 次スロット t を決定
-                let nextTurnIndex: number;
-                if (userParticipatesFlag) {
-                  // t = (s+1) mod (botCount+1)
-                  nextTurnIndex = (lastSlot + 1) % (botCount + 1);
-                } else {
-                  //t = (k mod botCount) + 1
-                  if (botCount === 0) {
-                  nextTurnIndex = 0; // AI不在ならユーザー扱いに戻す
-                  } else {
-                    //lastSlot<=1の時に、1にする。また、その値のうち、BOTの数を超える数を防ぐ。すなわち、1<=k<=numBotsの範囲にする
-                    const boundedSlot = Math.min(Math.max(1, lastSlot), botCount); // s を 1..botCount に丸める
+                // // 次スロット t を決定
+                // let nextTurnIndex: number;
+                // if (userParticipatesFlag) {
+                //   // t = (s+1) mod (botCount+1)
+                //   nextTurnIndex = (lastSlot + 1) % (botCount + 1);
+                // } else {
+                //   //t = (k mod botCount) + 1
+                //   if (botCount === 0) {
+                //   nextTurnIndex = 0; // AI不在ならユーザー扱いに戻す
+                //   } else {
+                //     //lastSlot<=1の時に、1にする。また、その値のうち、BOTの数を超える数を防ぐ。すなわち、1<=k<=numBotsの範囲にする
+                //     const boundedSlot = Math.min(Math.max(1, lastSlot), botCount); // s を 1..botCount に丸める
 
-                  // AI参加者の次スロットは (s mod botCount) + 1
-                  nextTurnIndex = (boundedSlot % botCount) + 1;
-                  }
-                }
-
+                //   // AI参加者の次スロットは (s mod botCount) + 1
+                //   nextTurnIndex = (boundedSlot % botCount) + 1;
+                //   }
+                // }
+                const nextTurnIndex = calculateNextTurn(lastSpeaker, bots, userParticipatesFlag);
                 setTurnIndex(nextTurnIndex);
                 if (nextTurnIndex > 0) setAwaitingAIResume(true);
                 }
@@ -405,12 +432,14 @@ const PlayPage: React.FC = () => {
    */
   const handleSubmit = async () => {
     const trimmed = inputText.trim();
+    // 入力が空、生成中、保存中は何もしない
     if (!trimmed || isGenerating || isSavingSession) { console.log('[input] 無効または処理中'); return; }
-    if (trimmed.length > 10000) { showInputTooLongWarning(trimmed.length); return; }
+    // 入力文字数チェック
+    if (trimmed.length > MAX_INPUT_LENGTH) { showInputTooLongWarning(trimmed.length); return; }
 
     try {
       const userMsg: TalkMessage = { speaker: 'ユーザー', message: trimmed, isUser: true, timestamp: new Date() };
-      // 画面反映は関数型更新で競合回避
+      // 画面反映は関数型更新で競合回避(非同期であるから)
       setMessages(prev => [...prev, userMsg]);
       const next = [...messages, userMsg]; // 保存・AI用のスナップショット
       setInputText('');
@@ -439,7 +468,7 @@ const PlayPage: React.FC = () => {
   /**
    * 必要に応じて要約を実行。
    * - 初回は一定件数以上でフル要約
-   * - 以降は差分件数に応じてインクリメンタル要約
+   * - 以降は差分件数に応じてインクリメンタル（増分）要約
    */
   const summarizeIfNeeded = async () => {
     if (!config) return;
@@ -453,10 +482,10 @@ const PlayPage: React.FC = () => {
     if (!historySummary) {
       if (totalMsgs < MIN_INITIAL_FULL) return; // まだ十分に蓄積していない
       try {
-        const history = messages.map(m => `${m.speaker}: ${m.message}`).join('\n');
-        const parts = [ ...(config.participate ? ['ユーザー'] : []), ...config.aiData.map(a => a.name) ];
-        setSummarizing(true);
-        const full = await summarizeDiscussion(config.discussionTopic, history, parts);
+        const history = messages.map(m => `${m.speaker}: ${m.message}`).join('\n');// 履歴をプロンプト形式に変換
+        const parts = [ ...(config.participate ? ['ユーザー'] : []), ...config.aiData.map(a => a.name) ];// 参加者名リスト
+        setSummarizing(true); 
+        const full = await summarizeDiscussion(config.discussionTopic, history, parts);// フル要約を実行
         setHistorySummary(full);
         setLastSummarizedIndex(totalMsgs);
         localStorage.setItem('summaryLog', JSON.stringify([{ ts: Date.now(), type: 'full', size: totalMsgs, summary: full }]));
@@ -472,7 +501,7 @@ const PlayPage: React.FC = () => {
       return;
     }
 
-    // 以降: 追加発言差分が一定数を超えたらインクリメンタル
+    // 以降: 追加発言差分が一定数を超えたらインクリメンタル（増分）要約
     const delta = totalMsgs - lastSummarizedIndex;
     if (delta < MIN_INCREMENTAL_DELTA) return;
 
@@ -505,12 +534,18 @@ const PlayPage: React.FC = () => {
     }
   };
 
+  const ANALYSIS_TURN_INTERVAL = 3;
+
   /**
-   * 必要に応じて3ターン毎の自動分析を実行。
-   * 条件に満たない場合は何もしません。
+   * 必要に応じて ANALYSIS_TURN_INTERVAL ターン毎の自動分析を実行。
+   * 条件に満たない場合は何もしない。
    */
   const analyzeIfNeeded = async () => {
-    if (!config || turnCount % 3 !== 0 || turnCount === 0 || messages.length < 3) return;
+    // 条件チェック
+    if (!config || turnCount === 0) return;
+    // ターン数が ANALYSIS_TURN_INTERVAL の倍数でない場合はスキップ
+    if (turnCount % ANALYSIS_TURN_INTERVAL !== 0) return;
+    if (messages.length < ANALYSIS_TURN_INTERVAL) return;
     // 直近と同一内容ならスキップ
     if (messages.length <= lastAnalyzedCount) return;
     await runAnalysis();
@@ -518,7 +553,7 @@ const PlayPage: React.FC = () => {
 
   /**
    * 議論の分析を実行し、解析結果をUIとストレージに反映。
-   * JSONの破損に耐えるために `jsonrepair` で修復を試みます。
+   * JSONの破損に耐えるために `jsonrepair` で修復を試みる。
    */
   const runAnalysis = async () => {
     if (!config || messages.length === 0 || isSavingSession) {
@@ -545,11 +580,12 @@ const PlayPage: React.FC = () => {
         try {
           parsed = JSON.parse(cleaned);
         } catch (e1) {
-          // 壊れJSONを修復して再パース
+          // 壊れたJSONを修復して再パース
           const repaired = jsonrepair(cleaned);
           parsed = JSON.parse(repaired);
         }
 
+        // 必要なフィールドの検証と整形
         const valid: DiscussionAnalysis = {
           mainPoints: Array.isArray(parsed.mainPoints) ? parsed.mainPoints.filter((p: any) => p && typeof p.point === 'string' && typeof p.description === 'string') : [],
           participantStances: Array.isArray(parsed.participantStances) ? parsed.participantStances.filter((s: any) => s && typeof s.participant === 'string') : [],
@@ -557,6 +593,7 @@ const PlayPage: React.FC = () => {
           commonGround: Array.isArray(parsed.commonGround) ? parsed.commonGround.filter((x: any) => typeof x === 'string') : [],
           unexploredAreas: Array.isArray(parsed.unexploredAreas) ? parsed.unexploredAreas.filter((x: any) => typeof x === 'string') : [],
         };
+
         setAnalysis(valid);
         // この時点のメッセージ数を記録（次回開閉時の不要実行を抑止）
         setLastAnalyzedCount(messages.length);
@@ -578,7 +615,7 @@ const PlayPage: React.FC = () => {
   };
 
   /**
-   * サイレント保存（多重保存時は最新版スナップショットをキューして単一フライトに連結）。
+   * サイレント保存（多重保存時は最新版スナップショットをキューして防止処理する）。
    * 既存セッションは更新、新規は作成してIDを確定。
    */
   const autoSaveSession = async (messagesToSave?: TalkMessage[]) => {
@@ -622,7 +659,7 @@ const PlayPage: React.FC = () => {
 
   /**
    * 指定ターン（未指定なら現在の `turnIndex`）のAI参加者で応答を生成し、
-   * 履歴/保存/次ターン計算までを行います。ユーザー参加ON時は次のAIが続く場合に自動チェーン。
+   * 履歴/保存/次ターン計算までを行います。ユーザー参加ON時は次のAIが続く場合に自動チェーン(連鎖的に次のターンを実行すること)。
    *
    * @param turnOverride 実行するターンの上書き（0=ユーザー、1..=AI）
    * @param baseMessages 応答生成の基準とする履歴スナップショット（未指定なら現在の `messages`）
@@ -646,7 +683,7 @@ const PlayPage: React.FC = () => {
     try {
       setIsGenerating(true);
       const base = baseMessages ?? messages;
-      const recentLines = base.slice(-KEEP_RECENT_TURNS).map(m => `${m.speaker}: ${m.message}`).join('\n');
+      const recentLines = base.slice(-KEEP_RECENT_TURNS).map(m => `${m.speaker}: ${m.message}`).join('\n');//末尾からKEEP_RECENT_TURNS件のメッセージを取得
       const history = historySummary ? `${historySummary}\n${recentLines}` : recentLines;
 
       const response = await generateAIResponse(bot.name, bot.role, bot.description, history, config.discussionTopic);
@@ -662,20 +699,32 @@ const PlayPage: React.FC = () => {
       try { await autoSaveSession(nextBase); } catch (e) { console.warn('[save] 自動保存失敗:', e); }
 
       // 次ターンを計算
-      const nextIdx = aiIdx + 1;
-      let nextTurnIndex: number;
-      if (config.participate) {
-        nextTurnIndex = nextIdx < config.aiData.length ? nextIdx + 1 : 0; // 次AI or ユーザー
-      } else {
-        nextTurnIndex = nextIdx < config.aiData.length ? nextIdx + 1 : 1; // 次AI or 最初のAI
-      }
+      // const nextIdx = aiIdx + 1;
+      // let nextTurnIndex: number;
+      // if (config.participate) {
+      //   nextTurnIndex = nextIdx < config.aiData.length ? nextIdx + 1 : 0; // 次AI or ユーザー
+      // } else {
+      //   nextTurnIndex = nextIdx < config.aiData.length ? nextIdx + 1 : 1; // 次AI or 最初のAI
+      // }
+      // setTurnIndex(nextTurnIndex);
+
+      // // ユーザー参加ON時で、次もAIなら自動でチェーン
+      // if (config.participate && nextTurnIndex > 0) {
+      //   scheduleNextTurn = nextTurnIndex;
+      //   setAwaitingAIResume(false);
+      // }
+
+      //次のターンを計算
+      const nextSpeaker = bot.name;
+      const nextTurnIndex = calculateNextTurn(nextSpeaker,config.aiData,config.participate);
       setTurnIndex(nextTurnIndex);
 
-      // ユーザー参加ON時で、次もAIなら自動でチェーン
-      if (config.participate && nextTurnIndex > 0) {
+      //チェーン条件(AIが次の時に自動実行)
+      if(nextTurnIndex > 0) {
         scheduleNextTurn = nextTurnIndex;
         setAwaitingAIResume(false);
       }
+
     } catch (e) {
       console.error('[ai] 応答生成失敗:', e);
       showAIResponseError(bot?.name || 'AI', `${e}`);
