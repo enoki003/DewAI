@@ -1,34 +1,77 @@
+/**
+ * @packageDocumentation
+ * データベース操作ユーティリティ。
+ * 
+ * DewAI で使用するSQLiteデータベースの操作を提供します。
+ * - セッション管理（保存・更新・削除・取得）
+ * - 分析結果の保存・取得
+ * - メタデータ管理（最終オープン時刻など）
+ * - スキーマ初期化とインデックス管理
+ */
 import Database from '@tauri-apps/plugin-sql'
 
+/**
+ * 保存されたセッションのデータ構造。
+ * 議論の全データを格納するメインテーブルのレコード。
+ */
 export interface SavedSession {
+  /** セッションの一意ID */
   id: number;
+  /** 議論のテーマ */
   topic: string;
+  /** 参加者情報（JSON文字列） */
   participants: string; // JSON string
+  /** メッセージ履歴（JSON文字列） */
   messages: string; // JSON string
-  model: string; // 使用AIモデル名 (例: "gemma3:1b")
+  /** 使用AIモデル名（例: "gemma3:1b"） */
+  model: string;
+  /** 作成日時（ISO文字列） */
   created_at: string;
+  /** 更新日時（ISO文字列） */
   updated_at: string;
 }
 
+/**
+ * セッション分析結果のデータ構造。
+ * AI生成による議論分析情報を格納するテーブルのレコード。
+ */
 export interface SessionAnalysisRow {
+  /** 分析レコードの一意ID */
   id: number;
+  /** 関連するセッションID */
   session_id: number;
-  kind: string; // 'analysis' | 'summary' | 'light' など
-  payload: string; // JSON string
+  /** 分析の種類（'analysis' | 'summary' | 'light' など） */
+  kind: string;
+  /** 分析結果データ（JSON文字列） */
+  payload: string;
+  /** 作成日時（ISO文字列） */
   created_at: string;
 }
 
+/** データベース接続インスタンス */
 let db: Database | null = null;
+/** メタテーブル初期化フラグ */
 let metaInitialized = false;
-// 追加: 全体スキーマ初期化フラグ
+/** 全体スキーマ初期化フラグ */
 let schemaInitialized = false;
 
+/**
+ * データベース接続を取得または作成します。
+ * @returns Database インスタンス
+ */
 function getDb(): Database {
   if (!db) db = Database.get('sqlite:dewai.db');
   return db;
 }
 
-// 追加: スキーマ初期化（PRAGMA/テーブル/インデックス）
+/**
+ * データベーススキーマを初期化します。
+ * - PRAGMA設定（外部キー制約、WALモード）
+ * - テーブル作成（sessions, session_analysis, session_meta）
+ * - インデックス作成（パフォーマンス向上）
+ * 
+ * 初回のみ実行され、以降は高速に処理をスキップします。
+ */
 async function ensureSchema() {
   if (schemaInitialized) return;
   const conn = getDb();
@@ -73,6 +116,10 @@ async function ensureSchema() {
   schemaInitialized = true;
 }
 
+/**
+ * セッションメタテーブルを確実に初期化します。
+ * 最後に開いた時刻を管理するためのテーブルです。
+ */
 async function ensureSessionMetaTable() {
   if (metaInitialized) return;
   const conn = getDb();
@@ -83,7 +130,12 @@ async function ensureSessionMetaTable() {
   metaInitialized = true;
 }
 
-// セッションの「最終オープン時刻」を更新（存在しなければ作成）
+/**
+ * セッションの最終オープン時刻を更新します。
+ * セッション一覧での「最近開いた順」ソートに使用されます。
+ * 
+ * @param sessionId 更新対象のセッションID
+ */
 export async function updateSessionLastOpened(sessionId: number): Promise<void> {
   await ensureSchema();
   const conn = getDb();
@@ -94,7 +146,15 @@ export async function updateSessionLastOpened(sessionId: number): Promise<void> 
   );
 }
 
-// 議論セッションを保存（新規）
+/**
+ * 新しい議論セッションを保存します。
+ * 
+ * @param topic 議論のテーマ
+ * @param participants 参加者情報（JSON文字列）
+ * @param messages メッセージ履歴（JSON文字列）
+ * @param model 使用AIモデル名（既定: "gemma3:4b"）
+ * @returns 新規作成されたセッションID
+ */
 export async function saveSession(
   topic: string,
   participants: string,
@@ -117,7 +177,12 @@ export async function saveSession(
   return newId;
 }
 
-// メッセージ更新
+/**
+ * 既存セッションのメッセージ履歴を更新します。
+ * 
+ * @param sessionId 更新対象のセッションID
+ * @param messages 新しいメッセージ履歴（JSON文字列）
+ */
 export async function updateSession(sessionId: number, messages: string): Promise<void> {
   await ensureSchema();
   const conn = getDb();
@@ -128,7 +193,12 @@ export async function updateSession(sessionId: number, messages: string): Promis
   );
 }
 
-// 参加者情報更新
+/**
+ * 既存セッションの参加者情報を更新します。
+ * 
+ * @param sessionId 更新対象のセッションID
+ * @param participants 新しい参加者情報（JSON文字列）
+ */
 export async function updateSessionParticipants(sessionId: number, participants: string): Promise<void> {
   await ensureSchema();
   const conn = getDb();
@@ -139,7 +209,12 @@ export async function updateSessionParticipants(sessionId: number, participants:
   );
 }
 
-// 全セッション取得（最近開いた順 → なければ更新日時降順）
+/**
+ * 全セッションを取得します。
+ * 最近開いた順 → 更新日時降順でソートされます。
+ * 
+ * @returns セッション配列（空の場合は空配列）
+ */
 export async function getAllSessions(): Promise<SavedSession[]> {
   try {
     await ensureSchema();
@@ -158,7 +233,12 @@ export async function getAllSessions(): Promise<SavedSession[]> {
   }
 }
 
-// ID指定取得
+/**
+ * 指定されたIDのセッションを取得します。
+ * 
+ * @param sessionId 取得対象のセッションID
+ * @returns セッションデータ（存在しない場合はnull）
+ */
 export async function getSessionById(sessionId: number): Promise<SavedSession | null> {
   await ensureSchema();
   const conn = getDb();
@@ -169,7 +249,12 @@ export async function getSessionById(sessionId: number): Promise<SavedSession | 
   return rows?.[0] ?? null;
 }
 
-// 削除（関連データも含めて整合性維持）
+/**
+ * 指定されたセッションを削除します。
+ * 関連する分析データ・メタデータも含めて削除されます。
+ * 
+ * @param sessionId 削除対象のセッションID
+ */
 export async function deleteSession(sessionId: number): Promise<void> {
   await ensureSchema();
   const conn = getDb();
@@ -179,13 +264,23 @@ export async function deleteSession(sessionId: number): Promise<void> {
   await conn.execute('DELETE FROM sessions WHERE id = $1', [sessionId]);
 }
 
-// DBクローズ
+/**
+ * データベース接続を適切に閉じます。
+ * アプリケーション終了時に呼び出してください。
+ */
 export async function closeDatabase(): Promise<void> {
   const conn = getDb();
   await conn.close();
 }
 
-// 解析結果の保存
+/**
+ * セッションの分析結果を保存します。
+ * 
+ * @param sessionId 関連するセッションID
+ * @param kind 分析の種類（'analysis' | 'summary' | 'light' など）
+ * @param payload 分析結果データ（JSON文字列）
+ * @returns 新規作成された分析レコードID
+ */
 export async function saveSessionAnalysis(
   sessionId: number,
   kind: string,
@@ -201,7 +296,15 @@ export async function saveSessionAnalysis(
   return result.lastInsertId ?? 0;
 }
 
-// 解析結果の取得（最新から）
+/**
+ * セッションの分析結果を取得します。
+ * 最新の分析結果から順番に返されます。
+ * 
+ * @param sessionId 対象セッションID
+ * @param kind 取得する分析の種類（指定しない場合は全種類）
+ * @param limit 取得件数の上限（既定: 10件）
+ * @returns 分析結果の配列
+ */
 export async function getSessionAnalysis(
   sessionId: number,
   kind?: string,
