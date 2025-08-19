@@ -38,7 +38,7 @@
  * ```
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback,useLayoutEffect } from 'react';
 import { 
   Box, 
   VStack, 
@@ -193,11 +193,16 @@ const [turnIndex, setTurnIndex] = useState(0);
    * メッセージ末尾にスクロール。
    * 自動スクロールが有効かつユーザー操作中でない場合にのみ実行。
    */
+  const bottomRef = useRef<HTMLDivElement>(null);
   const scrollToBottom = useCallback(() => {
+  if(bottomRef.current){
+    bottomRef.current.scrollIntoView({ block : 'end' });
+  }
+
     const el = messageListRef.current;
     if (!el) return;
     if (autoScrollRef.current && !userScrollingRef.current) {
-      el.scrollTop = el.scrollHeight;
+      el.scrollTop = el.scrollHeight - el.clientHeight;
     }
   }, []);
 
@@ -223,12 +228,28 @@ const [turnIndex, setTurnIndex] = useState(0);
   }, []);
 
   // メッセージ更新時スクロール
+  useLayoutEffect(() => {
+    if(messages.length === 0) return;
+  const id = requestAnimationFrame(() => 
+    requestAnimationFrame(() => scrollToBottom())
+  );
+    return () => cancelAnimationFrame(id);
+  }, [messages,isGenerating,analysisOpen,scrollToBottom]);
+
   useEffect(() => {
-    if (messages.length > 0) {
-      const id = window.setTimeout(() => scrollToBottom(), 100);
-      return () => window.clearTimeout(id);
-    }
-  }, [messages, scrollToBottom]);
+    const el = messageListRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      if (autoScrollRef.current && !userScrollingRef.current) {
+        scrollToBottom();
+      }
+    });
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+    };
+  }, [scrollToBottom]);
+
   
   // 3ターン毎の自動分析（ユーザー/AI問わずカウント後に発火）
 
@@ -857,7 +878,10 @@ const autoSaveSession = async (messagesToSave?: TalkMessage[]) => {
               
               {/* 余白 */}
               <Box height={{ base: "20px", md: "30px" }} />
-              
+
+              {/* 最下部アンカー */}
+              <div ref={bottomRef} />
+
               {/* 下部へスクロールボタン */}
               {!autoScroll && messages.length > 0 && (
                 <Box position="sticky" bottom={2} textAlign="center" mt={2}>
