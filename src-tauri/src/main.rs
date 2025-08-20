@@ -6,6 +6,9 @@ use tauri::command;
 use reqwest::Client;
 use serde_json::json;
 use tauri_plugin_sql::Builder as SqlBuilder;
+use once_cell::sync::Lazy;
+use tokio::sync::broadcast;
+use tokio::time::{sleep, Duration};
 
 // リトライ最大回数
 const MAX_RETRIES: u8 = 3;
@@ -16,6 +19,18 @@ const ERR_UNSUPPORTED_MODEL: &str = "サポートされていないモデルで�
 
 fn is_allowed_model(model: &str) -> bool {
     ALLOWED_MODEL_PREFIXES.iter().any(|p| model.starts_with(p))
+}
+
+// キャンセル制御: グローバル broadcast チャンネル
+static CANCEL_TX: Lazy<broadcast::Sender<()>> = Lazy::new(|| {
+    let (tx, _rx) = broadcast::channel(8);
+    tx
+});
+
+/// 進行中のOllama呼び出しをキャンセルする
+#[command]
+async fn cancel_ongoing_requests() {
+    let _ = CANCEL_TX.send(());
 }
 
 // ログ用のプロンプトマスキング関数
@@ -33,7 +48,7 @@ fn mask_prompt_for_log(prompt: &str) -> String {
     }
 }
 
-//生成呼び出し。失敗時指数バックオフで再試行。
+//生成呼び出し。失敗時指数バックオフで再試行。キャンセルに対応。
 async fn call_ollama_generate(model: &str, prompt: &str) -> Result<String, String> {
     let client = Client::builder()
         .build()
@@ -42,29 +57,55 @@ async fn call_ollama_generate(model: &str, prompt: &str) -> Result<String, Strin
     let body = json!({ "model": model, "prompt": prompt, "stream": false });
 
     let mut attempt: u8 = 1;
+    // 各呼び出しごとに購読者を作成
+    let mut cancel_rx = CANCEL_TX.subscribe();
+
     loop {
+        // 事前キャンセルチェック
+        if let Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) = cancel_rx.try_recv() {
+            return Err("キャンセルされました".into());
+        }
+
         println!("Ollama API リクエスト送信 (model={}, attempt={}/{})", model, attempt, MAX_RETRIES);
-        let resp = client.post("http://localhost:11434/api/generate").json(&body).send().await;
-        match resp {
-            Ok(res) => {
-                println!("ステータス: {}", res.status());
-                let json: serde_json::Value = res.json().await.map_err(|e| format!("JSONパース失敗: {}", e))?;
-                if let Some(resp_text) = json["response"].as_str() {
-                    println!("応答取得成功: {}文字", resp_text.len());
-                    return Ok(resp_text.to_string());
-                } else {
-                    let err = format!("応答フィールドなし: {:?}", json);
-                    println!("{}", err);
-                    if attempt >= MAX_RETRIES { return Err("応答なし".into()); }
-                }
+        // 送信→応答の待機をタイムアウト/キャンセルとレースさせる
+        let fut = client.post("http://localhost:11434/api/generate").json(&body).send();
+        tokio::select! {
+            _ = cancel_rx.recv() => {
+                return Err("キャンセルされました".into());
             }
-            Err(e) => {
-                println!("リクエスト失敗: {}", e);
-                if attempt >= MAX_RETRIES { return Err(format!("リクエスト失敗: {}", e)); }
+            resp = fut => {
+                match resp {
+                    Ok(res) => {
+                        println!("ステータス: {}", res.status());
+                        let json: serde_json::Value = res.json().await.map_err(|e| format!("JSONパース失敗: {}", e))?;
+                        if let Some(resp_text) = json["response"].as_str() {
+                            println!("応答取得成功: {}文字", resp_text.len());
+                            return Ok(resp_text.to_string());
+                        } else {
+                            let err = format!("応答フィールドなし: {:?}", json);
+                            println!("{}", err);
+                            if attempt >= MAX_RETRIES { return Err("応答なし".into()); }
+                        }
+                    }
+                    Err(e) => {
+                        println!("リクエスト失敗: {}", e);
+                        if attempt >= MAX_RETRIES { return Err(format!("リクエスト失敗: {}", e)); }
+                    }
+                }
             }
         }
         let backoff_ms = 300u64.saturating_mul(2u64.saturating_pow((attempt - 1) as u32));
         println!("{}ms 後に再試行...", backoff_ms);
+        // キャンセルも監視しつつ待機
+        let mut waited = 0u64;
+        while waited < backoff_ms {
+            if let Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) = cancel_rx.try_recv() {
+                return Err("キャンセルされました".into());
+            }
+            let step = 50u64.min(backoff_ms - waited);
+            sleep(Duration::from_millis(step)).await;
+            waited += step;
+        }
         attempt += 1;
     }
 }
@@ -328,7 +369,8 @@ pub fn main() {
             analyze_discussion_points,
             summarize_discussion,
             generate_ai_profiles,
-            incremental_summarize_discussion
+            incremental_summarize_discussion,
+            cancel_ongoing_requests
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -118,7 +118,7 @@ const calculateNextTurn = (
 const PlayPage: React.FC = () => {
   const navigate = useNavigate();// React Routerのナビゲーションフック
   // AIモデルフックから必要な関数を取得
-  const { generateAIResponse, summarizeDiscussion, analyzeDiscussionPoints, isModelLoaded, selectedModel, changeModel, checkModelStatus, incrementalSummarizeDiscussion } = useAIModel();
+  const { generateAIResponse, summarizeDiscussion, analyzeDiscussionPoints, isModelLoaded, selectedModel, changeModel, checkModelStatus, incrementalSummarizeDiscussion, cancelOngoingRequests } = useAIModel();
   
   // 状態定義
   /** 現在の画面設定（議論テーマ/参加者/ユーザー参加可否） */
@@ -236,6 +236,13 @@ const [turnIndex, setTurnIndex] = useState(0);
     return () => cancelAnimationFrame(id);
   }, [messages,isGenerating,analysisOpen,scrollToBottom]);
 
+  // アンマウント時に進行中のリクエストをキャンセル
+  useEffect(() => {
+    return () => { cancelOngoingRequests().catch(() => {}); };
+  }, [cancelOngoingRequests]);
+
+  const isCanceled = (e: any) => String(e || '').includes('キャンセルされました');
+
   useEffect(() => {
     const el = messageListRef.current;
     if (!el) return;
@@ -288,8 +295,12 @@ useEffect(() => {
         }
       }
     } catch (e) {
-      console.error('[summary] failed:', e);
-      showAnalysisError('議論要約', String(e));
+      if (isCanceled(e)) {
+        console.log('[summary] キャンセル検知');
+      } else {
+        console.error('[summary] failed:', e);
+        showAnalysisError('議論要約', String(e));
+      }
     } finally {
       setSummarizing(false);
     }
@@ -577,8 +588,12 @@ useEffect(() => {
         showAnalysisError('議論分析', `JSON解析に失敗しました: ${pe}`);
       }
     } catch (e) {
-      console.error('[analysis] 実行失敗:', e);
-      showAnalysisError('議論分析', `${e}`);
+      if (isCanceled(e)) {
+        console.log('[analysis] キャンセル検知');
+      } else {
+        console.error('[analysis] 実行失敗:', e);
+        showAnalysisError('議論分析', `${e}`);
+      }
     } finally {
       setLastAnalyzedCount(messages.length);
       setAnalyzing(false);
@@ -680,8 +695,12 @@ const autoSaveSession = async (messagesToSave?: TalkMessage[]) => {
       }
 
     } catch (e) {
-      console.error('[ai] 応答生成失敗:', e);
-      showAIResponseError(bot?.name || 'AI', `${e}`);
+      if (isCanceled(e)) {
+        console.log('[ai] キャンセル検知');
+      } else {
+        console.error('[ai] 応答生成失敗:', e);
+        showAIResponseError(bot?.name || 'AI', `${e}`);
+      }
     } finally {
       setIsGenerating(false);
       if (scheduleNextTurn && nextBase) {
@@ -699,6 +718,8 @@ const autoSaveSession = async (messagesToSave?: TalkMessage[]) => {
    */
   const handleBack = async () => {
     try {
+      // 先に進行中の生成をキャンセル
+      await cancelOngoingRequests();
       await autoSaveSession(messages);
       const start = Date.now();
       while (isSavingSession) {

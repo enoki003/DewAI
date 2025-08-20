@@ -65,6 +65,8 @@ export interface UseAIModelApi {
     desiredCount?: number,
     styleHint?: string
   ) => Promise<Array<{ name: string; role: string; description: string }>>;
+  /** 進行中のOllamaリクエストをキャンセルします。 */
+  cancelOngoingRequests: () => Promise<void>;
 }
 
 /**
@@ -321,6 +323,17 @@ export const useAIModel = (): UseAIModelApi => {
     }
   };
 
+  /**
+   * 進行中のOllamaリクエストをキャンセル。
+   */
+  const cancelOngoingRequests = async (): Promise<void> => {
+    try {
+      await invoke('cancel_ongoing_requests');
+    } catch (e) {
+      console.warn('キャンセル要求に失敗:', e);
+    }
+  };
+
   return {
     /** モデル接続状態 */
     isModelLoaded,
@@ -339,5 +352,6 @@ export const useAIModel = (): UseAIModelApi => {
     incrementalSummarizeDiscussion,
     analyzeDiscussionPoints,
     generateAIProfiles,
+    cancelOngoingRequests,
   };
 };

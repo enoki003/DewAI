@@ -43,13 +43,17 @@ import { showGenericError } from '../components/ui/notifications';
  * - 入力検証後に設定を localStorage へ保存し、Playへ遷移
  */
 function Config() {
-  const { selectedModel, changeModel, isModelLoaded, generateAIProfiles } = useAIModel();
+  const { selectedModel, changeModel, isModelLoaded, generateAIProfiles, cancelOngoingRequests } = useAIModel();
   const [botCount, setBotCount] = React.useState(1);
   const [showFields, setShowFields] = React.useState(false);
   const [participate, setParticipate] = React.useState(true);
   const [discussionTopic, setDiscussionTopic] = React.useState('');
 
   const navigate = useNavigate();
+
+  React.useEffect(() => {
+    return () => { cancelOngoingRequests().catch(() => {}); };
+  }, [cancelOngoingRequests]);
 
   /** AI参加者の単一プロフィール */
   interface BotProfile {
@@ -119,7 +123,7 @@ function Config() {
         position="absolute" 
         top={4} 
         left={4}
-        onClick={() => navigate('/start')}
+        onClick={async () => { await cancelOngoingRequests(); navigate('/start'); }}
       >
         ← 戻る
       </Button>
