@@ -7,7 +7,7 @@ use reqwest::Client;
 use serde_json::json;
 use tauri_plugin_sql::Builder as SqlBuilder;
 use once_cell::sync::Lazy;
-use tokio::sync::broadcast;
+use tokio::sync::broadcast::{self, error::TryRecvError};
 use tokio::time::{sleep, Duration};
 
 // リトライ最大回数
@@ -61,9 +61,12 @@ async fn call_ollama_generate(model: &str, prompt: &str) -> Result<String, Strin
     let mut cancel_rx = CANCEL_TX.subscribe();
 
     loop {
-        // 事前キャンセルチェック
-        if let Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) = cancel_rx.try_recv() {
-            return Err("キャンセルされました".into());
+        // 事前キャンセルチェック（try_recv は TryRecvError を返す）
+        match cancel_rx.try_recv() {
+            Ok(_) => { return Err("キャンセルされました".into()); }
+            Err(TryRecvError::Closed) => { return Err("キャンセルされました".into()); }
+            Err(TryRecvError::Lagged(_)) => { return Err("キャンセルされました".into()); }
+            Err(TryRecvError::Empty) => {}
         }
 
         println!("Ollama API リクエスト送信 (model={}, attempt={}/{})", model, attempt, MAX_RETRIES);
@@ -99,8 +102,11 @@ async fn call_ollama_generate(model: &str, prompt: &str) -> Result<String, Strin
         // キャンセルも監視しつつ待機
         let mut waited = 0u64;
         while waited < backoff_ms {
-            if let Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) = cancel_rx.try_recv() {
-                return Err("キャンセルされました".into());
+            match cancel_rx.try_recv() {
+                Ok(_) => { return Err("キャンセルされました".into()); }
+                Err(TryRecvError::Closed) => { return Err("キャンセルされました".into()); }
+                Err(TryRecvError::Lagged(_)) => { return Err("キャンセルされました".into()); }
+                Err(TryRecvError::Empty) => {}
             }
             let step = 50u64.min(backoff_ms - waited);
             sleep(Duration::from_millis(step)).await;
