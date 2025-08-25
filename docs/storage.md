@@ -41,7 +41,7 @@ PRAGMA: foreign_keys=ON, journal_mode=WAL
 
 ## 3. ポリシー
 - 同一トピックは継続上書き（新規保存は最初の1回のみ）
-- `/play` のAI編集は、アクティブセッション参加者にも反映
+- `/play` のAI編集は、アクティブセッションの participants にも即時反映（DBも updateSessionParticipants で更新）
 
 ## 4. エクスポート/インポート（将来）
 - JSONエクスポート: 単一/全セッション

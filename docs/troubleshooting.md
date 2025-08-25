@@ -34,7 +34,7 @@
 ## 6. 既知の制約
 - 応答は全文生成後に表示（非ストリーミング）
 - 入力は1メッセージ 10,000 文字上限
-- 保存は localStorage（SQLite へ移行予定）
+- 保存は SQLite（`@tauri-apps/plugin-sql`）。localStorage は設定/再開フラグの一時保存にのみ使用
 
 ## 7. 連絡/報告
 - Issue: GitHub リポジトリの Issues へ
