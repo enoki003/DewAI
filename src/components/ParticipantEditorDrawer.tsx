@@ -18,10 +18,13 @@ import {
   Text,
   Input,
   Textarea,
-  Checkbox,
   Tabs,
   FieldRoot,
-  FieldLabel
+  FieldLabel,
+  CheckboxRoot,
+  CheckboxControl,
+  CheckboxLabel,
+  CheckboxHiddenInput,
 } from '@chakra-ui/react';
 import { 
   showParticipantsUpdateError,
@@ -215,15 +218,17 @@ export const ParticipantEditorDrawer: React.FC<ParticipantEditorDrawerProps> = (
           <Drawer.Body>
             <VStack align="stretch" gap={4}>
               <Box p={3} bg="green.subtle" borderRadius="md" border="1px solid" borderColor="green.muted">
-                <Checkbox.Root
+                {/* 旧: Checkbox.Root → 新: CheckboxRoot 構成に統一 */}
+                <CheckboxRoot
                   checked={editUserParticipates}
                   onCheckedChange={(details) => setEditUserParticipates(details.checked === true)}
+                  colorPalette="green"
+                  size="md"
                 >
-                  <Checkbox.Control>
-                    <Checkbox.Indicator />
-                  </Checkbox.Control>
-                  <Checkbox.Label>あなた（ユーザー）も参加する</Checkbox.Label>
-                </Checkbox.Root>
+                  <CheckboxHiddenInput />
+                  <CheckboxControl />
+                  <CheckboxLabel>あなた（ユーザー）も参加する</CheckboxLabel>
+                </CheckboxRoot>
               </Box>
 
               <Tabs.Root value={activeEditTab} onValueChange={(details: any) => setActiveEditTab(details.value)} orientation="vertical">

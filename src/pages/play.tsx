@@ -171,7 +171,7 @@ const [turnIndex, setTurnIndex] = useState(0);
   /** 参加者編集ドロワーの開閉状態 */
   const [editOpen, setEditOpen] = useState(false);
   /** 参加者編集ドロワーを開く */
-  const openEditor = () => { if (!config) return; setEditOpen(true); };
+  const openEditor = () => { if (!config) return; setAnalysisOpen(false); setEditOpen(true); };
   /** 参加者編集ドロワーを閉じる */
   const closeEditor = () => setEditOpen(false);
 
